@@ -102,7 +102,7 @@ function App() {
       return
     }
     setModelState('loading')
-    StableDiffusionPipeline.fromPretrained('webgpu', '/aislamov/stable-diffusion-2-1-base-onnx', progressCallback)
+    StableDiffusionPipeline.fromPretrained('webgpu', 'aislamov/stable-diffusion-2-1-base-onnx', progressCallback)
       .then((p) => {
         pipeline.current = p
         setModelState('ready')
@@ -137,7 +137,7 @@ function App() {
       <CssBaseline enableColorScheme={true} />
       <Container>
         <Stack>
-          <Alert severity="error">You need Chrome Canary with "Unsafe WebGPU Support", "Experimental WebAssembly", and "Experimental WebAssembly JavaScript Promise Integration (JSPI)" flags!</Alert>
+          <Alert severity="error">You need latest Chrome with "Experimental WebAssembly" and "Experimental WebAssembly JavaScript Promise Integration (JSPI)" flags enabled!</Alert>
         </Stack>
         <Box sx={{ bgcolor: '#282c34' }} pt={4} pl={3} pr={3} pb={4}>
           <Grid container spacing={2}>
@@ -167,6 +167,7 @@ function App() {
                 <p>Each step takes about 1 minute + ~10sec to run VAE decoder to generate image. Having DevTools open will slow everything down to about 2x.
                   UNET runs only on CPU (it's 10% faster and does not give correct results on GPU), so will hang the browser tab.</p>
                 <p>Minimum number of steps to get an acceptable result is 20. However, 3 would be fine for demo purposes.</p>
+                <p>Model files will be cached and you won't need to download them each time.</p>
                 <Button variant="outlined" onClick={loadModel} disabled={modelState != 'none'}>Load model</Button>
                 <Button variant="outlined" onClick={runInference} disabled={modelState != 'ready'}>Run</Button>
                 <p>{status}</p>
