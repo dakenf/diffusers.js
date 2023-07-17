@@ -7,6 +7,10 @@ function extendArray(arr: number[], length: number) {
   return arr.concat(Array(length - arr.length).fill(0));
 }
 
+function extendBigArray(arr: BigInt[], length: number) {
+  return arr.concat(Array(length - arr.length).fill(0));
+}
+
 interface SchedulerConfig {
   "beta_end": number,
   "beta_schedule": string,
@@ -20,9 +24,14 @@ interface SchedulerConfig {
   "trained_betas": null
 }
 
+export interface ProgressCallback {
+  images: tf.Tensor2D[]
+  step: string
+}
+
 export class StableDiffusionPipeline {
   public unet: InferenceSession
-  public vae?: InferenceSession
+  public vae: InferenceSession
   public textEncoder?: InferenceSession
   public tokenizer: Tokenizer
   public scheduler: PNDMScheduler
@@ -30,7 +39,7 @@ export class StableDiffusionPipeline {
   private static sessionOptions: InferenceSession.SessionOptions
   private static searchPath: string
 
-  constructor(unet: InferenceSession, vae: InferenceSession|undefined, textEncoder: InferenceSession|undefined, tokenizer: Tokenizer, scheduler: PNDMScheduler, sdVersion: 1|2 = 2) {
+  constructor(unet: InferenceSession, vae: InferenceSession, textEncoder: InferenceSession|undefined, tokenizer: Tokenizer, scheduler: PNDMScheduler, sdVersion: 1|2 = 2) {
     this.unet = unet
     this.vae = vae
     this.textEncoder = textEncoder
@@ -55,7 +64,7 @@ export class StableDiffusionPipeline {
     return scheduler
   }
 
-  static async fromPretrained(executionProvider: 'cpu'|'cuda'|'directml'|'wasm'|'webnn'|'webgpu' = 'cpu', modelRepoOrPath: string, revision?: string, sdVersion: 1|2 = 2) {
+  static async fromPretrained(executionProvider: 'cpu'|'cuda'|'directml'|'wasm'|'webnn'|'webgpu'|'webgl' = 'cpu', modelRepoOrPath: string, revision?: string, sdVersion: 1|2 = 2) {
     let searchPath = modelRepoOrPath
     // let's check in the cache if path does not exist
     // if (!await fileExists(`${searchPath}/text_encoder/model.onnx`) && searchPath[0] !== '.' && searchPath[0] !== '/') {
@@ -73,24 +82,22 @@ export class StableDiffusionPipeline {
 
     const sessionOption: InferenceSession.SessionOptions = {
       executionProviders: [executionProvider],
-      logSeverityLevel: 0,
-      logVerbosityLevel: 0,
-      extra: {
-        session: {
-          use_ort_model_bytes_directly: "1",
-          use_ort_model_bytes_for_initializers: "1",
-        }
-      }
+      executionMode: 'sequential',
+      // enableCpuMemArena: true,
+      // logSeverityLevel: 0,
+      // logVerbosityLevel: 0,
+      // extra: {
+      //   session: {
+      //     use_ort_model_bytes_directly: "0",
+      //     use_ort_model_bytes_for_initializers: "0",
+      //   }
+      // }
     }
     this.sessionOptions = sessionOption
 
-    const textEncoder = await InferenceSession.create(`${StableDiffusionPipeline.searchPath}/text_encoder/model.onnx`, StableDiffusionPipeline.sessionOptions)
-    console.log('creating session unet')
     const unet = await InferenceSession.create(`${searchPath}/unet/model.onnx`, sessionOption)
-    console.log('created session unet')
+    const textEncoder = await InferenceSession.create(`${StableDiffusionPipeline.searchPath}/text_encoder/model.onnx`, StableDiffusionPipeline.sessionOptions)
     const vae = await InferenceSession.create(`${searchPath}/vae_decoder/model.onnx`, sessionOption)
-
-
 
     const schedulerConfig = await (await fetch(`${searchPath}/scheduler/scheduler_config.json`)).json()
     const scheduler = await StableDiffusionPipeline.createScheduler(schedulerConfig)
@@ -109,6 +116,9 @@ export class StableDiffusionPipeline {
   }
 
   async getPromptEmbeds (prompt: string, negativePrompt: string|undefined) {
+    if (!this.textEncoder) {
+      this.textEncoder = await InferenceSession.create(`${StableDiffusionPipeline.searchPath}/text_encoder/model.onnx`, StableDiffusionPipeline.sessionOptions)
+    }
     const promptEmbeds = await this.encodePrompt(prompt)
     const negativePromptEmbeds = await this.encodePrompt(negativePrompt || '')
 
@@ -117,7 +127,19 @@ export class StableDiffusionPipeline {
     return new Tensor('float32', [...negativePromptEmbeds.data as unknown as number[], ...promptEmbeds.data as unknown as number[]], newShape)
   }
 
-  async run (prompt: string, negativePrompt: string|undefined, batchSize: number, guidanceScale: number, numInferenceSteps: number) {
+  async makeImages (latents: tf.Tensor, batchSize: number, width: number, height: number) {
+    latents = latents.clone().mul(tf.tensor(1).div(0.18215))
+    const decoded = await this.vae.run({ latent_sample: new Tensor('float32', await latents.data(), [1, 4, width / 8, height / 8]) })
+    const decodedTensor = tf.tensor(decoded.sample.data as Float32Array, decoded.sample.dims as number[], decoded.sample.type as 'float32')
+    return decodedTensor
+      .div(2)
+      .add(0.5)
+      .mul(255).round().clipByValue(0, 255).cast('int32')
+      .transpose([0, 2, 3, 1])
+      .split(batchSize, 0)
+  }
+
+  async run (prompt: string, negativePrompt: string|undefined, batchSize: number, guidanceScale: number, numInferenceSteps: number, runVaeOnEachStep = false, callback: (i: ProgressCallback) => Promise<void>) {
     const width = 512
     const height = 512
     if (batchSize != 1) {
@@ -130,11 +152,8 @@ export class StableDiffusionPipeline {
     const saved = localStorage.getItem('prompt1');
     if (saved) {
       promptEmbeds = JSON.parse(saved)
-      console.log('pe', promptEmbeds)
       const array = Float32Array.from(Object.values(promptEmbeds.data))
-      console.log('arr', array)
       promptEmbeds = new Tensor('float32', array, promptEmbeds.dims)
-      console.log('pe', promptEmbeds)
     } else {
       promptEmbeds = await this.getPromptEmbeds(prompt, negativePrompt)
       localStorage.setItem('prompt', JSON.stringify(promptEmbeds))
@@ -143,12 +162,12 @@ export class StableDiffusionPipeline {
     // @ts-ignore
     // await this.textEncoder.release()
 
-    console.log('promptEmbeds', promptEmbeds)
     const latentShape = [batchSize, 4, width / 8, height / 8]
     let latents = tf.randomNormal(latentShape, undefined, undefined, 'float32')
 
     const doClassifierFreeGuidance = guidanceScale > 1
     for (const step of (await this.scheduler.timesteps.data() as unknown as number[])) {
+      console.log('step', step)
       // for some reason v1.4 takes int64 as timestep input. ideally we should get input dtype from the model
       const timestep = this.sdVersion == 2
         ? new Tensor('float32', [step])
@@ -160,8 +179,6 @@ export class StableDiffusionPipeline {
       let noise = await this.unet.run(
         { sample: latentInput, timestep, encoder_hidden_states: promptEmbeds },
       )
-      console.log('noise', noise)
-
       let noisePred = Object.values(noise)[0].data as Float32Array
 
       let noisePredTf
@@ -176,30 +193,23 @@ export class StableDiffusionPipeline {
         noisePredTf = tf.tensor(noisePred, latentShape, 'float32')
       }
 
-      console.log('noisePredTf', noisePredTf)
-
       const schedulerOutput = this.scheduler.step(
         noisePredTf,
         step,
         latents,
       )
       latents = schedulerOutput
+      if (callback) {
+        if (runVaeOnEachStep) {
+          const images = await this.makeImages(latents, batchSize, width, height)
+          await callback({
+            step: 'Finished step',
+            images: images.map(t => t.squeeze([0])),
+          })
+        }
+      }
     }
-    latents = latents.mul(tf.tensor(1).div(0.18215))
 
-    if (!this.vae) {
-      throw new Error('VAE not initialized')
-    }
-    const decoded = await this.vae.run({ latent_sample: new Tensor('float32', await latents.data(), [1, 4, width / 8, height / 8]) })
-
-    const decodedTensor = tf.tensor(decoded.sample.data as Float32Array, decoded.sample.dims as number[], decoded.sample.type as 'float32')
-    const images = decodedTensor
-      .div(2)
-      .add(0.5)
-      .mul(255).round().clipByValue(0, 255).cast('int32')
-      .transpose([0, 2, 3, 1])
-      .split(batchSize)
-
-    return images.map(i => i.reshape([width, height, 3])) as tf.Tensor3D[]
+    return this.makeImages(latents, batchSize, width, height)
   }
 }

@@ -5,6 +5,8 @@ const path = require("path");
 const srcFolder = path.join(__dirname, "node_modules", "onnxruntime-web", "dist");
 const destFolder = path.join(__dirname, "public", "static", "js");
 
+fs.rmdirSync(path.resolve('./node_modules/.cache'), { recursive: true })
+
 if (fs.existsSync(destFolder)) {
   fs.rmSync(destFolder, { recursive: true, force: true });
 }
@@ -16,10 +18,18 @@ fs.copyFileSync(
   path.join(destFolder, "ort-wasm-simd.wasm")
 );
 fs.copyFileSync(
+  path.join(srcFolder, "ort-wasm-simd.jsep.wasm"),
+  path.join(destFolder, "ort-wasm-simd.jsep.wasm")
+);
+fs.copyFileSync(
   path.join(srcFolder, "ort-wasm-threaded.wasm"),
   path.join(destFolder, "ort-wasm-threaded.wasm")
 );
 fs.copyFileSync(
   path.join(srcFolder, "ort-wasm-simd-threaded.wasm"),
   path.join(destFolder, "ort-wasm-simd-threaded.wasm")
+);
+fs.copyFileSync(
+  path.join(srcFolder, "ort-wasm-simd-threaded.jsep.wasm"),
+  path.join(destFolder, "ort-wasm-simd-threaded.jsep.wasm")
 );
