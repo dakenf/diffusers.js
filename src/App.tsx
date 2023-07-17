@@ -59,11 +59,13 @@ function FAQ () {
         <ListItem>
           <h2>FAQ</h2>
         </ListItem>
+        <FaqItem question={'What if I get protobuf parsing failed error?'} answer={'Open DevTools, go to Application -> Storage and press "Clear site data".'} />
+        <FaqItem question={'What if I get sbox_fatal_memory_exceeded?'} answer={"You don't have enough RAM to run SD. You can try reloading the tab or browser."} />
         <FaqItem question={'How did you make it possible?'} answer={'In order to run it, I had to port StableDiffusionPipeline from python to JS. Then patch onnxruntime and emscripten+binaryen (WebAssembly compiler toolchain) to support allocating and using >4GB memory. Once my pull requests get to release, anyone would be able to compile and run code that uses >4GB in the browser.'} />
         <FaqItem question={'Why is it so slow?'} answer={'It does not support multi-threading yet, so is using just one CPU core. There is no way to create 64 bit memory with SharedArrayBuffer through WebAssembly.Memory constructor. I’ve proposed a spec change to have “memory64” flag and after it’s accepted, i will patch V8 engine to support it.'} />
         <FaqItem question={'But it’s running on a GPU, right?'} answer={'Yes, but webgpu is onnxruntime is in early stage, so a lot of operations are not yet implemented. And data is constantly transferred from and to CPU through JS. Once the majority of operations will have their JS kernels, it will be way faster.'} />
         <FaqItem question={'Can I run it locally?'} answer={'Yes, this page’s code is available here: '} />
-        <FaqItem question={'Can I use your patched onnxruntime to run big LLMs with transformers.js?'} answer={'Yes, you can use this package but i don’t guarantee it will be working in all cases. This build is limited to 8GB of memory, so you can load up to ~4GB weights.'} />
+        <FaqItem question={'Can I use your patched onnxruntime to run big LLMs with transformers.js?'} answer={'Yes, you can use this package but i don’t guarantee it will be working in all cases. This build is limited to 8GB of memory, so you can load up to ~4GB weights. Just use https://www.npmjs.com/package/@aislamov/onnxruntime-web64'} />
         <FaqItem question={'Are you going to make a pull request in onnxruntime repo?'} answer={'Yes. It will be my second one, i’ve added GPU acceleration to node.js binding earlier.'} />
       </List>
     </Box>
@@ -84,16 +86,15 @@ function App() {
   }, [])
 
   const progressCallback = async (info: ProgressCallbackPayload) => {
+    if (info.step) {
+      setStatus(info.step)
+    }
     if (info.images) {
       const canvas = document.getElementById('canvas') as HTMLCanvasElement
       if (canvas) {
         const data = await info.images[0].toImageData({ tensorLayout: 'NCWH', format: 'RGB' });
-        console.log(data)
         canvas.getContext('2d')!.putImageData(data, 0, 0);
       }
-    }
-    if (info.step) {
-      setStatus(info.step)
     }
   }
   const loadModel = () => {

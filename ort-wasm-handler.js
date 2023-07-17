@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 // copy onnxruntime-web WebAssembly files to public/ folder
-const srcFolder = path.join(__dirname, "node_modules", "onnxruntime-web", "dist");
+const srcFolder = path.join(__dirname, "node_modules", "@aislamov/onnxruntime-web64", "dist");
 const destFolder = path.join(__dirname, "public", "static", "js");
 
 if (fs.existsSync('./node_modules/.cache')) {

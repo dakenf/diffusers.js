@@ -1,4 +1,4 @@
-import { InferenceSession } from 'onnxruntime-web';
+import { InferenceSession } from '@aislamov/onnxruntime-web64';
 import { PNDMScheduler, SchedulerConfig } from './schedulers/PNDMScheduler'
 // @ts-ignore
 import { getModelFile, getModelJSON } from '@xenova/transformers/src/utils/hub'
