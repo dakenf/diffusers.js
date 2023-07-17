@@ -5,7 +5,9 @@ const path = require("path");
 const srcFolder = path.join(__dirname, "node_modules", "onnxruntime-web", "dist");
 const destFolder = path.join(__dirname, "public", "static", "js");
 
-fs.rmdirSync(path.resolve('./node_modules/.cache'), { recursive: true })
+if (fs.existsSync('./node_modules/.cache')) {
+  fs.rmdirSync(path.resolve('./node_modules/.cache'), { recursive: true })
+}
 
 if (fs.existsSync(destFolder)) {
   fs.rmSync(destFolder, { recursive: true, force: true });

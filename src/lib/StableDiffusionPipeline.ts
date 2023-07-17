@@ -1,45 +1,45 @@
-import * as tf from '@tensorflow/tfjs'
-import { InferenceSession, Tensor } from 'onnxruntime-web';
-import Tokenizer from './tokenizer'
-import { PNDMScheduler } from './schedulers/PNDMScheduler'
+import { InferenceSession } from 'onnxruntime-web';
+import { PNDMScheduler, SchedulerConfig } from './schedulers/PNDMScheduler'
+// @ts-ignore
+import { getModelFile, getModelJSON } from '@xenova/transformers/src/utils/hub'
+import { CLIPTokenizer } from './tokenizers/CLIPTokenizer'
+import { cat, randomNormalTensor, replaceTensors } from './Tensor'
+import { Tensor } from '@xenova/transformers'
 
-function extendArray(arr: number[], length: number) {
-  return arr.concat(Array(length - arr.length).fill(0));
+async function sessionRun (session: InferenceSession, inputs: Record<string, Tensor>) {
+  // @ts-ignore
+  const result = await session.run(inputs)
+  return replaceTensors(result)
 }
 
-function extendBigArray(arr: BigInt[], length: number) {
-  return arr.concat(Array(length - arr.length).fill(0));
-}
-
-interface SchedulerConfig {
-  "beta_end": number,
-  "beta_schedule": string,
-  "beta_start": number,
-  "clip_sample": boolean,
-  "num_train_timesteps": number,
-  prediction_type?: "epsilon"|"v-preditcion",
-  "set_alpha_to_one": boolean,
-  "skip_prk_steps": boolean,
-  "steps_offset": number,
-  "trained_betas": null
-}
-
-export interface ProgressCallback {
-  images: tf.Tensor2D[]
+export interface ProgressCallbackPayload {
+  images?: Tensor[]
   step: string
+}
+
+export type ProgressCallback = (cb: ProgressCallbackPayload) => Promise<void>
+
+export interface StableDiffusionInput {
+  prompt: string
+  negativePrompt?: string
+  guidanceScale?: number
+  width?: number
+  height?: number
+  numInferenceSteps: number
+  sdV1?: boolean
+  progressCallback?: ProgressCallback
+  runVaeOnEachStep?: boolean
 }
 
 export class StableDiffusionPipeline {
   public unet: InferenceSession
   public vae: InferenceSession
-  public textEncoder?: InferenceSession
-  public tokenizer: Tokenizer
+  public textEncoder: InferenceSession
+  public tokenizer: CLIPTokenizer
   public scheduler: PNDMScheduler
   private sdVersion
-  private static sessionOptions: InferenceSession.SessionOptions
-  private static searchPath: string
 
-  constructor(unet: InferenceSession, vae: InferenceSession, textEncoder: InferenceSession|undefined, tokenizer: Tokenizer, scheduler: PNDMScheduler, sdVersion: 1|2 = 2) {
+  constructor(unet: InferenceSession, vae: InferenceSession, textEncoder: InferenceSession, tokenizer: CLIPTokenizer, scheduler: PNDMScheduler, sdVersion: 1|2 = 2) {
     this.unet = unet
     this.vae = vae
     this.textEncoder = textEncoder
@@ -49,7 +49,7 @@ export class StableDiffusionPipeline {
   }
 
   static async createScheduler (config: SchedulerConfig) {
-    const scheduler = new PNDMScheduler(
+    return new PNDMScheduler(
       {
         prediction_type: 'epsilon',
         ...config,
@@ -59,157 +59,161 @@ export class StableDiffusionPipeline {
       config.beta_end,
       config.beta_schedule,
     )
-    await scheduler.setAlphasCumprod()
-
-    return scheduler
   }
 
-  static async fromPretrained(executionProvider: 'cpu'|'cuda'|'directml'|'wasm'|'webnn'|'webgpu'|'webgl' = 'cpu', modelRepoOrPath: string, revision?: string, sdVersion: 1|2 = 2) {
-    let searchPath = modelRepoOrPath
-    // let's check in the cache if path does not exist
-    // if (!await fileExists(`${searchPath}/text_encoder/model.onnx`) && searchPath[0] !== '.' && searchPath[0] !== '/') {
-    //   searchPath = MODEL_CACHE_DIR + modelRepoOrPath
-    //   if (!await fileExists(`${searchPath}/text_encoder/model.onnx`)) {
-    //     console.log(`Model not found in cache dir ${searchPath}, downloading from hub...`)
-    //     await StableDiffusionPipeline.downloadFromHub(searchPath, modelRepoOrPath, revision)
-    //   }
-    // }
-    //
-    // if (!await fileExists(`${searchPath}/text_encoder/model.onnx`)) {
-    //   throw new Error("Could not find model files. Maybe you are not using onnx version")
-    // }
-    this.searchPath = searchPath;
+  async sleep (ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+  }
 
-    const sessionOption: InferenceSession.SessionOptions = {
-      executionProviders: [executionProvider],
-      executionMode: 'sequential',
-      // enableCpuMemArena: true,
-      // logSeverityLevel: 0,
-      // logVerbosityLevel: 0,
-      // extra: {
-      //   session: {
-      //     use_ort_model_bytes_directly: "0",
-      //     use_ort_model_bytes_for_initializers: "0",
-      //   }
-      // }
+  static async fromPretrained(executionProvider: 'wasm'|'webgpu'|'cpu'|'cuda'|'directml' = 'cpu', modelRepoOrPath: string, progressCallback: ProgressCallback) {
+    const hubProgressCallback = (data: { status: string, file: string, progress: number }) => {
+      if (data.status === 'progress') {
+        progressCallback({
+          step: `Downloading ${data.file}, ${Math.round(data.progress)}%`
+        })
+      } else {
+        progressCallback({
+          step: `Downloaded ${data.file}`
+        })
+      }
     }
-    this.sessionOptions = sessionOption
 
-    const unet = await InferenceSession.create(`${searchPath}/unet/model.onnx`, sessionOption)
-    const textEncoder = await InferenceSession.create(`${StableDiffusionPipeline.searchPath}/text_encoder/model.onnx`, StableDiffusionPipeline.sessionOptions)
-    const vae = await InferenceSession.create(`${searchPath}/vae_decoder/model.onnx`, sessionOption)
+    const opts = {
+      progress_callback: hubProgressCallback,
+    }
+    const sessionOption: InferenceSession.SessionOptions = { executionProviders: [executionProvider] }
+    const unet = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/unet/model.onnx', true, opts), { executionProviders: ['wasm'] })
+    const textEncoder = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/text_encoder/model.onnx', true, opts), sessionOption)
+    const vae = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/vae_decoder/model.onnx', true, opts), sessionOption)
 
-    const schedulerConfig = await (await fetch(`${searchPath}/scheduler/scheduler_config.json`)).json()
+    const schedulerConfig = await getModelJSON(modelRepoOrPath, '/scheduler/scheduler_config.json', true, opts)
     const scheduler = await StableDiffusionPipeline.createScheduler(schedulerConfig)
 
-    const merges = await (await fetch(`${searchPath}/tokenizer/merges.txt`)).text()
-    const tokenizerConfig = await (await fetch(`${searchPath}/tokenizer/tokenizer_config.json`)).json()
-    const vocab = await (await fetch(`${searchPath}/tokenizer/vocab.json`)).json()
-    return new StableDiffusionPipeline(unet, vae, textEncoder, new Tokenizer(merges, tokenizerConfig, vocab.toString()), scheduler, sdVersion)
+    const tokenizer = await CLIPTokenizer.from_pretrained(modelRepoOrPath, opts)
+    progressCallback({
+      step: 'Ready',
+    })
+    return new StableDiffusionPipeline(unet, vae, textEncoder, tokenizer, scheduler, 2)
   }
 
   async encodePrompt (prompt: string): Promise<Tensor> {
-    const tokens = this.tokenizer.encode(prompt)
-    const tensorTokens = new Tensor('int32', Int32Array.from(extendArray([49406, ...tokens.slice(0, this.tokenizer.tokenMaxLen - 2), 49407], 77)), [1, 77])
-    const encoded = await this.textEncoder?.run({ input_ids: tensorTokens })
-    return encoded?.last_hidden_state as Tensor
+    const tokens = this.tokenizer(
+      prompt,
+      {
+        return_tensor: false,
+        padding: true,
+        max_length: this.tokenizer.model_max_length,
+        return_tensor_dtype: 'int32'
+      },
+    );
+
+    const inputIds = tokens.input_ids
+    // @ts-ignore
+    const encoded = await sessionRun(this.textEncoder, { input_ids: new Tensor(Int32Array.from(inputIds.flat()), [1, inputIds.length]) });
+    return encoded.last_hidden_state
   }
 
   async getPromptEmbeds (prompt: string, negativePrompt: string|undefined) {
-    if (!this.textEncoder) {
-      this.textEncoder = await InferenceSession.create(`${StableDiffusionPipeline.searchPath}/text_encoder/model.onnx`, StableDiffusionPipeline.sessionOptions)
-    }
     const promptEmbeds = await this.encodePrompt(prompt)
     const negativePromptEmbeds = await this.encodePrompt(negativePrompt || '')
 
-    const newShape = [...promptEmbeds.dims]
-    newShape[0] = 2
-    return new Tensor('float32', [...negativePromptEmbeds.data as unknown as number[], ...promptEmbeds.data as unknown as number[]], newShape)
+    return cat([negativePromptEmbeds, promptEmbeds])
   }
 
-  async makeImages (latents: tf.Tensor, batchSize: number, width: number, height: number) {
-    latents = latents.clone().mul(tf.tensor(1).div(0.18215))
-    const decoded = await this.vae.run({ latent_sample: new Tensor('float32', await latents.data(), [1, 4, width / 8, height / 8]) })
-    const decodedTensor = tf.tensor(decoded.sample.data as Float32Array, decoded.sample.dims as number[], decoded.sample.type as 'float32')
-    return decodedTensor
-      .div(2)
-      .add(0.5)
-      .mul(255).round().clipByValue(0, 255).cast('int32')
-      .transpose([0, 2, 3, 1])
-      .split(batchSize, 0)
-  }
+  async run(input: StableDiffusionInput) {
+    const width = input.width || 512
+    const height = input.height || 512
+    const batchSize = 1
+    const guidanceScale = input.guidanceScale || 7.5
+    this.scheduler.setTimesteps(input.numInferenceSteps || 5)
+    await input.progressCallback!({
+      step: 'Encoding prompt...',
+    })
 
-  async run (prompt: string, negativePrompt: string|undefined, batchSize: number, guidanceScale: number, numInferenceSteps: number, runVaeOnEachStep = false, callback: (i: ProgressCallback) => Promise<void>) {
-    const width = 512
-    const height = 512
-    if (batchSize != 1) {
-      throw new Error('Currently only batch size of 1 is supported.')
-    }
-
-    this.scheduler.setTimesteps(numInferenceSteps)
-
-    let promptEmbeds
-    const saved = localStorage.getItem('prompt1');
-    if (saved) {
-      promptEmbeds = JSON.parse(saved)
-      const array = Float32Array.from(Object.values(promptEmbeds.data))
-      promptEmbeds = new Tensor('float32', array, promptEmbeds.dims)
-    } else {
-      promptEmbeds = await this.getPromptEmbeds(prompt, negativePrompt)
-      localStorage.setItem('prompt', JSON.stringify(promptEmbeds))
-    }
-
-    // @ts-ignore
-    // await this.textEncoder.release()
+    const promptEmbeds = await this.getPromptEmbeds(input.prompt, input.negativePrompt)
 
     const latentShape = [batchSize, 4, width / 8, height / 8]
-    let latents = tf.randomNormal(latentShape, undefined, undefined, 'float32')
+    let latents = randomNormalTensor(latentShape, undefined, undefined, 'float32')
 
     const doClassifierFreeGuidance = guidanceScale > 1
-    for (const step of (await this.scheduler.timesteps.data() as unknown as number[])) {
-      console.log('step', step)
+    let humanStep = 1
+    let cachedImages: Tensor[]|null = null
+    for (const step of this.scheduler.timesteps.data) {
       // for some reason v1.4 takes int64 as timestep input. ideally we should get input dtype from the model
-      const timestep = this.sdVersion == 2
-        ? new Tensor('float32', [step])
-        : new Tensor(BigInt64Array.from([BigInt(step)]), [1])
+      // but currently onnxruntime-node does not give out types, only input names
+      const timestep = input.sdV1
+        ? new Tensor(BigInt64Array.from([BigInt(step)]))
+        : new Tensor(new Float32Array([step]))
+      await input.progressCallback!({
+        step: `Running unet step ${humanStep}`,
+      })
+      // sleep to update UI
+      await this.sleep(100)
+      const latentInput = doClassifierFreeGuidance ? cat([latents, latents.clone()]) : latents
 
-      const latentInputTf = doClassifierFreeGuidance ? latents.concat(latents.clone()) : latents
-      const latentInput = new Tensor(await latentInputTf.data(), latentInputTf.shape)
-
-      let noise = await this.unet.run(
-        { sample: latentInput, timestep, encoder_hidden_states: promptEmbeds },
+      let noise = await sessionRun(
+        this.unet,
+        { sample: await latentInput, timestep, encoder_hidden_states: promptEmbeds },
       )
-      let noisePred = Object.values(noise)[0].data as Float32Array
 
-      let noisePredTf
+      let noisePred = noise.out_sample
       if (doClassifierFreeGuidance) {
-        const len = Object.values(noise)[0].data.length / 2
         const [noisePredUncond, noisePredText] = [
-          tf.tensor(noisePred.slice(0, len), latentShape, 'float32'),
-          tf.tensor(noisePred.slice(len, len * 2), latentShape, 'float32'),
+          noisePred.slice([0, 1]),
+          noisePred.slice([1, 2]),
         ]
-        noisePredTf = noisePredUncond.add(noisePredText.sub(noisePredUncond).mul(guidanceScale))
-      } else {
-        noisePredTf = tf.tensor(noisePred, latentShape, 'float32')
+        noisePred = noisePredUncond.add(noisePredText.sub(noisePredUncond).mul(guidanceScale))
       }
 
-      const schedulerOutput = this.scheduler.step(
-        noisePredTf,
+      latents = this.scheduler.step(
+        noisePred,
         step,
         latents,
       )
-      latents = schedulerOutput
-      if (callback) {
-        if (runVaeOnEachStep) {
-          const images = await this.makeImages(latents, batchSize, width, height)
-          await callback({
-            step: 'Finished step',
-            images: images.map(t => t.squeeze([0])),
+
+      if (input.progressCallback) {
+        if (input.runVaeOnEachStep) {
+          await input.progressCallback({
+            step: `Running vae...`,
+          })
+          cachedImages = await this.makeImages(latents, batchSize, width, height)
+          await input.progressCallback({
+            step: 'Finished step ' + humanStep,
+            images: cachedImages,
+          })
+        } else {
+          await input.progressCallback({
+            step: 'Finished step ' + humanStep,
           })
         }
       }
+      humanStep++
+      // sleep to update UI
+      await this.sleep(500)
+    }
+
+    if (input.runVaeOnEachStep) {
+      return cachedImages!
     }
 
     return this.makeImages(latents, batchSize, width, height)
+  }
+
+  async makeImages (latents: Tensor, batchSize: number, width: number, height: number) {
+    latents = latents.mul(1 / 0.18215)
+
+    const decoded = await sessionRun(
+      this.vae,
+      { latent_sample: latents }
+    )
+
+    const images = decoded.sample
+      .div(2)
+      .add(0.5)
+      // .mul(255)
+      // .round()
+      // .clipByValue(0, 255)
+      // .transpose(0, 2, 3, 1)
+    return [images]
   }
 }
