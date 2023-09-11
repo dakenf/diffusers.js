@@ -237,6 +237,15 @@ export class PNDMScheduler {
     return prevSample;
   }
 
+  // Taken from https://github.com/huggingface/diffusers/blob/d1e20be664dd8774e49d1a9d54fd71ec7cd5863c/src/diffusers/schedulers/scheduling_pndm.py#L453
+  add_noise(original_samples: Tensor, noise: Tensor, timestep: number) {
+    let sqrt_alpha_prod = this.alphasCumprod.data[timestep] ** 0.5;
+    let sqrt_one_minus_alpha_prod = (1 - this.alphasCumprod.data[timestep]) ** 0.5;
+
+    const noisy_samples = original_samples.mul(sqrt_alpha_prod).add(noise.mul(sqrt_one_minus_alpha_prod));
+    return noisy_samples
+  }
+
 }
 
 function betasForAlphaBar(numDiffusionTimesteps: number, maxBeta = 0.999) {

@@ -1,5 +1,6 @@
 import { Tensor as ONNXTensor } from 'onnxruntime-common'
 import { Tensor } from '@xenova/transformers'
+import seedrandom from 'seedrandom';
 
 Tensor.prototype.reverse = function () {
   return new Tensor(this.type, this.data.reverse(), this.dims.slice());
@@ -211,18 +212,20 @@ export function linspace(start: number, end: number, num: number, type = 'float3
   return new Tensor(type, arr, [num]);
 }
 
-function randomNormal() {
+function randomNormal(rng: seedrandom.prng) {
   let u = 0, v = 0;
-  while(u === 0) u = Math.random();
-  while(v === 0) v = Math.random();
+
+  while(u === 0) u = rng();
+  while(v === 0) v = rng();
   let num = Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v );
   return num;
 }
 
-export function randomNormalTensor(shape: number[], mean = 0, std = 1, type = 'float32') {
+export function randomNormalTensor(shape: number[], mean = 0, std = 1, type = 'float32', seed: string) {
   let data = [];
+  let rng = seed != '' ? seedrandom(seed) : seedrandom();
   for (let i = 0; i < shape.reduce((a, b) => a * b); i++) {
-    data.push(randomNormal() * std + mean);
+    data.push(randomNormal(rng) * std + mean);
   }
   return new Tensor(type, data, shape);
 }
