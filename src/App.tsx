@@ -63,6 +63,7 @@ const BrowserFeatures = () => {
   const [hasSharedMemory64, setHasSharedMemory64] = useState(false);
   const [hasJspi, setHasJspi] = useState(false);
   const [hasF16, setHasF16] = useState(false);
+  const [hasGpu, setHasGpu] = useState(false);
 
   useEffect(() => {
     memory64().then(value => setHasMemory64(value))
@@ -78,10 +79,15 @@ const BrowserFeatures = () => {
       //
     }
 
-    // @ts-ignore
-    navigator.gpu.requestAdapter().then((adapter) => {
-      setHasF16(adapter.features.has('shader-f16'))
-    })
+    try {
+      // @ts-ignore
+      navigator.gpu.requestAdapter().then((adapter) => {
+        setHasF16(adapter.features.has('shader-f16'))
+      })
+      setHasGpu(true)
+    } catch (e) {
+      //
+    }
 
   }, [])
 
@@ -91,6 +97,7 @@ const BrowserFeatures = () => {
       {!hasJspi && <Alert severity="error">You need "Experimental WebAssembly JavaScript Promise Integration (JSPI)" flag enabled!</Alert>}
       {!hasSharedMemory64 && <Alert severity="error">You need Chrome Canary 119 or newer!</Alert>}
       {!hasF16 && <Alert severity="error">You need to run chrome with --enable-dawn-features=allow_unsafe_apis on linux/mac or with --enable-dawn-features=allow_unsafe_apis,use_dxc on windows!</Alert>}
+      {!hasGpu && <Alert severity="error">You need a browser with WebGPU support!</Alert>}
     </Stack>
   )
 }
@@ -142,7 +149,7 @@ function App() {
   function getRgbData(d: Uint8ClampedArray) {
     let rgbData: any = [[], [], []]; // [r, g, b]
     // remove alpha and put into correct shape:
-    for(let i = 0; i < d.length; i += 4) { 
+    for(let i = 0; i < d.length; i += 4) {
         let x = (i/4) % 512;
         let y = Math.floor((i/4) / 512)
         if(!rgbData[0][y]) rgbData[0][y] = [];
@@ -257,7 +264,7 @@ function App() {
                   onChange={(e) => setSeed(e.target.value)}
                   value={seed}
                 />
-                <FormControlLabel 
+                <FormControlLabel
                   label="Check if you want to use the Img2Img pipeline"
                   control={<Checkbox
                     disabled={modelState != 'ready'}
