@@ -1,4 +1,5 @@
-import { InferenceSession } from '@aislamov/onnxruntime-web64';
+// @ts-ignore
+import { InferenceSession } from '@aislamov/onnxruntime-web64/webgpu';
 import { PNDMScheduler, SchedulerConfig } from './schedulers/PNDMScheduler'
 // @ts-ignore
 import { getModelFile, getModelJSON } from '@xenova/transformers/src/utils/hub'
@@ -90,12 +91,15 @@ export class StableDiffusionPipeline {
       // local_files_only: true
     }
     
-    const sessionOption: InferenceSession.SessionOptions = { executionProviders: [executionProvider] }
-    
-    const unet = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/unet/model.onnx', true, opts), { executionProviders: ['wasm'] })
-    const textEncoder = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/text_encoder/model.onnx', true, opts), sessionOption)
-    const vae = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/vae_decoder/model.onnx', true, opts), sessionOption)
-    const vae_encoder = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/vae_encoder/model.onnx', true, opts), sessionOption)
+    const sessionOptions: InferenceSession.SessionOptions = {
+      executionProviders: [executionProvider],
+      executionMode: 'parallel',
+    }
+
+    const unet = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/unet/model.onnx', true, opts), sessionOptions)
+    const textEncoder = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/text_encoder/model.onnx', true, opts), sessionOptions)
+    const vae_encoder = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/vae_encoder/model.onnx', true, opts), sessionOptions)
+    const vae = await InferenceSession.create(await getModelFile(modelRepoOrPath, '/vae_decoder/model.onnx', true, opts), sessionOptions)
 
     const schedulerConfig = await getModelJSON(modelRepoOrPath, '/scheduler/scheduler_config.json', true, opts)
     const scheduler = await StableDiffusionPipeline.createScheduler(schedulerConfig)
@@ -183,13 +187,11 @@ export class StableDiffusionPipeline {
       await input.progressCallback!({
         step: `Running unet step ${humanStep}`,
       })
-      // sleep to update UI
-      await this.sleep(100)
       const latentInput = doClassifierFreeGuidance ? cat([latents, latents.clone()]) : latents
 
       let noise = await sessionRun(
         this.unet,
-        { sample: await latentInput, timestep, encoder_hidden_states: promptEmbeds },
+        { sample: latentInput, timestep, encoder_hidden_states: promptEmbeds },
       )
 
       let noisePred = noise.out_sample
@@ -224,10 +226,7 @@ export class StableDiffusionPipeline {
         }
       }
       humanStep++
-      // sleep to update UI
-      await this.sleep(500)
     }
-    
 
     if (input.runVaeOnEachStep) {
       return cachedImages!

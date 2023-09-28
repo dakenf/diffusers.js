@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import './App.css';
 import { ProgressCallback, ProgressCallbackPayload, StableDiffusionPipeline } from './lib/StableDiffusionPipeline'
-import { debounce } from 'lodash'
 import CssBaseline from '@mui/material/CssBaseline';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
@@ -13,32 +12,17 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
-import ListItemButton from '@mui/material/ListItemButton';
-import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Divider from '@mui/material/Divider';
 import { Checkbox } from '@mui/material';
 import { FormControlLabel } from '@mui/material';
+import { memory64 } from "wasm-feature-detect"
 
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
   },
 });
-// async function inference () {
-//   try {
-//
-//     // const pipe = await StableDiffusionPipeline.fromPretrained('webgl', '/aislamov/sd2_1base');
-//     // @ts-ignore
-//     window.pipe = pipe
-//     // const result = pipe.run("a horse", "", 1, 7.5, 30)
-//     // console.log(result);
-//   } catch (e) {
-//     console.error(e)
-//   }
-// }
-
-// const debouncedInference = debounce(inference, 1000)
 
 function FaqItem (props: { question: string, answer:string }){
   return (
@@ -74,11 +58,48 @@ function FAQ () {
   )
 }
 
+const BrowserFeatures = () => {
+  const [hasMemory64, setHasMemory64] = useState(false);
+  const [hasSharedMemory64, setHasSharedMemory64] = useState(false);
+  const [hasJspi, setHasJspi] = useState(false);
+  const [hasF16, setHasF16] = useState(false);
+
+  useEffect(() => {
+    memory64().then(value => setHasMemory64(value))
+    // @ts-ignore
+    setHasJspi(typeof WebAssembly.Function !== 'undefined')
+
+    try {
+      // @ts-ignore
+      const mem = new WebAssembly.Memory({ initial: 1, maximum: 2, shared: true, index: 'i64' })
+      // @ts-ignore
+      setHasSharedMemory64(mem.type().index === 'i64')
+    } catch (e) {
+      //
+    }
+
+    // @ts-ignore
+    navigator.gpu.requestAdapter().then((adapter) => {
+      setHasF16(adapter.features.has('shader-f16'))
+    })
+
+  }, [])
+
+  return (
+    <Stack>
+      {!hasMemory64 && <Alert severity="error">You need latest Chrome with "Experimental WebAssembly" flag enabled!</Alert>}
+      {!hasJspi && <Alert severity="error">You need "Experimental WebAssembly JavaScript Promise Integration (JSPI)" flag enabled!</Alert>}
+      {!hasSharedMemory64 && <Alert severity="error">You need Chrome Canary 119 or newer!</Alert>}
+      {!hasF16 && <Alert severity="error">You need to run chrome with --enable-dawn-features=allow_unsafe_apis on linux/mac or with --enable-dawn-features=allow_unsafe_apis,use_dxc on windows!</Alert>}
+    </Stack>
+  )
+}
+
 function App() {
   const [modelState, setModelState] = useState<'none'|'loading'|'ready'|'inferencing'>('none');
   const [prompt, setPrompt] = useState('an astronaut riding a horse');
   const [negativePrompt, setNegativePrompt] = useState('');
-  const [inferenceSteps, setInferenceSteps] = useState(3);
+  const [inferenceSteps, setInferenceSteps] = useState(20);
   const [guidanceScale, setGuidanceScale] = useState(7.5);
   const [seed, setSeed] = useState('');
   const [status, setStatus] = useState('Ready');
@@ -86,6 +107,7 @@ function App() {
   const [img2img, setImg2Img] = useState(false);
   const [inputImage, setInputImage] = useState<Float32Array>();
   const [strength, setStrength] = useState(0.8);
+  const [runVaeOnEachStep, setRunVaeOnEachStep] = useState(false);
   useEffect(() => {
     if (typeof window !== 'undefined') {
       // debouncedInference()
@@ -105,7 +127,7 @@ function App() {
     }
   }
   const loadModel = () => {
-    if (!window.confirm('This will download approximately 3.5gb and use 8gb of your RAM. Are you sure want to continue?')) {
+    if (!window.confirm('This will download approximately 2.5gb, use about 5gb of your RAM and up to 12gb VRAM. Are you sure want to continue?')) {
       return
     }
     setModelState('loading')
@@ -175,7 +197,7 @@ function App() {
       seed: seed,
       width: 512,
       height: 512,
-      runVaeOnEachStep: true,
+      runVaeOnEachStep,
       progressCallback,
       img2imgFlag: img2img,
       inputImage: inputImage,
@@ -192,9 +214,7 @@ function App() {
     <ThemeProvider theme={darkTheme}>
       <CssBaseline enableColorScheme={true} />
       <Container>
-        <Stack>
-          <Alert severity="error">You need latest Chrome with "Experimental WebAssembly" and "Experimental WebAssembly JavaScript Promise Integration (JSPI)" flags enabled!</Alert>
-        </Stack>
+        <BrowserFeatures/>
         <Box sx={{ bgcolor: '#282c34' }} pt={4} pl={3} pr={3} pb={4}>
           <Grid container spacing={2}>
             <Grid item xs={6}>
@@ -262,10 +282,16 @@ function App() {
                   onChange={(e) => setStrength(parseFloat(e.target.value))}
                   value={strength}
                 />
-                <p>Each step takes about 1 minute + ~10sec to run VAE decoder to generate image. Having DevTools open will slow everything down to about 2x.
-                  UNET runs only on CPU (it's 10% faster and does not give correct results on GPU), so will hang the browser tab.</p>
-                <p>Minimum number of steps to get an acceptable result is 20. However, 3 would be fine for demo purposes.</p>
-                <p>Model files will be cached and you won't need to download them each time.</p>
+                <FormControlLabel
+                  label="Check if you want to run VAE after each step"
+                  control={<Checkbox
+                    disabled={modelState != 'ready'}
+                    onChange={(e) => setRunVaeOnEachStep(e.target.checked)}
+                    checked={runVaeOnEachStep}
+                  />}
+                />
+                <p>Press the button below to download StableDiffusion 2.1 base. It will be stored in your browser cache.</p>
+                <p>All settings above will become editable once model is downloaded.</p>
                 <Button variant="outlined" onClick={loadModel} disabled={modelState != 'none'}>Load model</Button>
                 <Button variant="outlined" onClick={runInference} disabled={modelState != 'ready'}>Run</Button>
                 <p>{status}</p>
