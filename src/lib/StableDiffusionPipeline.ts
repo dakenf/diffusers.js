@@ -1,24 +1,11 @@
 // @ts-ignore
 import { InferenceSession } from '@aislamov/onnxruntime-web64/webgpu';
 import { PNDMScheduler, SchedulerConfig } from './schedulers/PNDMScheduler'
-// @ts-ignore
-import { getModelFile, getModelJSON } from '@xenova/transformers/src/utils/hub'
 import { CLIPTokenizer } from './tokenizers/CLIPTokenizer'
 import { cat, randomNormalTensor, replaceTensors } from './Tensor'
 import { Tensor } from '@xenova/transformers'
-
-async function sessionRun (session: InferenceSession, inputs: Record<string, Tensor>) {
-  // @ts-ignore
-  const result = await session.run(inputs)
-  return replaceTensors(result)
-}
-
-export interface ProgressCallbackPayload {
-  images?: Tensor[]
-  step: string
-}
-
-export type ProgressCallback = (cb: ProgressCallbackPayload) => Promise<void>
+import { ProgressCallback, sessionRun } from './common'
+import { getModelFile, getModelJSON } from './hub/hub'
 
 export interface StableDiffusionInput {
   prompt: string
@@ -60,11 +47,7 @@ export class StableDiffusionPipeline {
       {
         prediction_type: 'epsilon',
         ...config,
-      },
-      config.num_train_timesteps,
-      config.beta_start,
-      config.beta_end,
-      config.beta_schedule,
+      }
     )
   }
 
@@ -90,7 +73,7 @@ export class StableDiffusionPipeline {
       // revision: '9f697c96d42e5c09437ff14b0a2b287366ce488d',
       // local_files_only: true
     }
-    
+
     const sessionOptions: InferenceSession.SessionOptions = {
       executionProviders: [executionProvider],
       executionMode: 'parallel',
@@ -104,7 +87,7 @@ export class StableDiffusionPipeline {
     const schedulerConfig = await getModelJSON(modelRepoOrPath, '/scheduler/scheduler_config.json', true, opts)
     const scheduler = await StableDiffusionPipeline.createScheduler(schedulerConfig)
 
-    const tokenizer = await CLIPTokenizer.from_pretrained(modelRepoOrPath, opts)
+    const tokenizer = await CLIPTokenizer.from_pretrained(modelRepoOrPath, {...opts, subdir: 'tokenizer' })
     progressCallback({
       step: 'Ready',
     })
@@ -163,7 +146,7 @@ export class StableDiffusionPipeline {
       })
 
       const image_latent = await this.encodeImage(inputImage); // Encode image to latent space
-      
+
       // Taken from https://towardsdatascience.com/stable-diffusion-using-hugging-face-variations-of-stable-diffusion-56fd2ab7a265#2d1d
       const init_timestep = Math.round(input.numInferenceSteps * strength);
       const timestep = timesteps.toReversed()[init_timestep];
@@ -193,6 +176,8 @@ export class StableDiffusionPipeline {
         this.unet,
         { sample: latentInput, timestep, encoder_hidden_states: promptEmbeds },
       )
+
+      console.log('got noise', noise)
 
       let noisePred = noise.out_sample
       if (doClassifierFreeGuidance) {

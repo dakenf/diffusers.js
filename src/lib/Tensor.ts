@@ -194,6 +194,8 @@ Tensor.prototype.clipByValue_ = function (min: number, max: number) {
   return this;
 }
 
+Tensor.prototype.location = 'cpu'
+
 
 export function range (start: number, end: number, step = 1, type = 'float32') {
   let data = [];
@@ -212,7 +214,7 @@ export function linspace(start: number, end: number, num: number, type = 'float3
   return new Tensor(type, arr, [num]);
 }
 
-function randomNormal(rng: seedrandom.prng) {
+function randomNormal(rng: seedrandom.PRNG) {
   let u = 0, v = 0;
 
   while(u === 0) u = rng();
@@ -236,50 +238,67 @@ export function randomNormalTensor(shape: number[], mean = 0, std = 1, type = 'f
  * @param {any} tensors The array of tensors to concatenate.
  * @returns {Tensor} The concatenated tensor.
  */
-export function cat(tensors: Tensor[]) {
+export function cat(tensors: Tensor[], axis: number = 0) {
   if (tensors.length === 0) {
-    return tensors[0];
+    throw new Error('No tensors provided.');
   }
-  // NOTE: tensors must be batched
-  // NOTE: currently only supports dim=0
-  // TODO: add support for dim != 0
 
+  // Handle negative axis by converting it to its positive counterpart
+  if (axis < 0) {
+    axis = tensors[0].dims.length + axis;
+  }
 
   let tensorType = tensors[0].type;
   let tensorShape = [...tensors[0].dims];
-  tensorShape[0] = tensors.length;
+
+  // Ensure all tensors have the same shape except for the concatenation axis
+  for (let t of tensors) {
+    for (let i = 0; i < tensorShape.length; i++) {
+      if (i !== axis && tensorShape[i] !== t.dims[i]) {
+        throw new Error('Tensor dimensions must match for concatenation, except along the specified axis.');
+      }
+    }
+  }
+
+  // Calculate the size of the concatenated tensor along the specified axis
+  tensorShape[axis] = tensors.reduce((sum, t) => sum + t.dims[axis], 0);
 
   // Calculate total size to allocate
-  let total = 0;
-  for (let t of tensors) {
-    total += t.data.length;
-  }
+  let total = tensorShape.reduce((product, size) => product * size, 1);
 
-  if (tensorShape.length === 1) {
-    // 1D tensors are concatenated into a 1D tensor
-    tensorShape = [total];
-  }
-
-  // Create output tensor of same type as first
+  // Create output tensor of same type as the first tensor
   let data = new tensors[0].data.constructor(total);
 
   let offset = 0;
   for (let t of tensors) {
-    data.set(t.data, offset);
-    offset += t.data.length;
-  }
-
-  return new Tensor(tensorType, data, tensorShape)
-}
-
-export function replaceTensors (modelRunResult: any) {
-  // Convert ONNX Tensors with our custom Tensor class
-  // to support additional functions
-  for (let prop in modelRunResult) {
-    // @ts-ignore
-    if (modelRunResult[prop].dims) {
-      modelRunResult[prop] = new Tensor(modelRunResult[prop].type, modelRunResult[prop].data, modelRunResult[prop].dims);
+    let copySize = t.data.length / t.dims[axis];  // size of each slice along the axis
+    for (let i = 0; i < t.dims[axis]; i++) {
+      let sourceStart = i * copySize;
+      let sourceEnd = sourceStart + copySize;
+      data.set(t.data.slice(sourceStart, sourceEnd), offset);
+      offset += copySize;
     }
   }
-  return modelRunResult;
+
+  return new Tensor(tensorType, data, tensorShape);
+}
+
+export function replaceTensors (modelRunResult: Record<string, ONNXTensor>): Record<string, Tensor> {
+  // Convert ONNX Tensors with our custom Tensor class
+  // to support additional functions
+  const result: Record<string, Tensor> = {}
+  for (let prop in modelRunResult) {
+    if (modelRunResult[prop].dims) {
+      // @ts-ignore
+      result[prop] = new Tensor(
+        // @ts-ignore
+        modelRunResult[prop].type,
+        // @ts-ignore
+        modelRunResult[prop].data,
+        // @ts-ignore
+        modelRunResult[prop].dims
+      );
+    }
+  }
+  return result;
 }

@@ -36,32 +36,23 @@ export class PNDMScheduler {
   config: SchedulerConfig; // Define your config type
 
   constructor(
-    config: SchedulerConfig,
-    numTrainTimesteps = 1000,
-    betaStart = 0.00085,
-    betaEnd = 0.012,
-    betaSchedule = "scaled_linear",
-    trainedBetas = null,
-    skipPrkSteps = false,
-    setAlphaToOne = false,
-    predictionType = "epsilon",
-    stepsOffset = 0
+    config: SchedulerConfig
   ) {
     this.config = config;
 
-    if (trainedBetas !== null) {
-      this.betas = linspace(betaStart, betaEnd, numTrainTimesteps)
-    } else if (betaSchedule === "linear") {
-      this.betas = linspace(betaStart, betaEnd, numTrainTimesteps)
-    } else if (betaSchedule === "scaled_linear") {
-      this.betas = linspace(betaStart ** 0.5, betaEnd ** 0.5, numTrainTimesteps).pow(2);
-    } else if (betaSchedule === "squaredcos_cap_v2") {
-      this.betas = betasForAlphaBar(numTrainTimesteps);
+    if (config.trained_betas !== null) {
+      this.betas = linspace(config.beta_start, config.beta_end, config.num_train_timesteps)
+    } else if (config.beta_schedule === "linear") {
+      this.betas = linspace(config.beta_start, config.beta_end, config.num_train_timesteps)
+    } else if (config.beta_schedule === "scaled_linear") {
+      this.betas = linspace(config.beta_start ** 0.5, config.beta_end ** 0.5, config.num_train_timesteps).pow(2);
+    } else if (config.beta_schedule === "squaredcos_cap_v2") {
+      this.betas = betasForAlphaBar(config.num_train_timesteps);
     } else {
-      throw new Error(`${betaSchedule} does is not implemented for ${this.constructor}`);
+      throw new Error(`${config.beta_schedule} does is not implemented for ${this.constructor}`);
     }
 
-    this.alphas = linspace(1, 1, numTrainTimesteps).sub(this.betas)
+    this.alphas = linspace(1, 1, config.num_train_timesteps).sub(this.betas)
 
     this.initNoiseSigma = 1.0;
     this.pndmOrder = 4;
@@ -73,12 +64,12 @@ export class PNDMScheduler {
     this.ets = []
 
     // setable values
-    this.timesteps = range(0, numTrainTimesteps).reverse();
+    this.timesteps = range(0, config.num_train_timesteps).reverse();
     this.prkTimesteps = null
     this.plmsTimesteps = null
 
     this.alphasCumprod = this.alphas.cumprod()
-    this.finalAlphaCumprod = setAlphaToOne ? 1.0 : this.alphasCumprod[0].data
+    this.finalAlphaCumprod = config.set_alpha_to_one ? 1.0 : this.alphasCumprod[0].data
   }
 
   setTimesteps (numInferenceSteps: number) {

@@ -1,6 +1,5 @@
-import { PreTrainedTokenizer, Tensor } from '@xenova/transformers'
-// @ts-ignore
-import { getModelFile, getModelJSON } from '@xenova/transformers/src/utils/hub'
+import { PretrainedOptions, PreTrainedTokenizer, Tensor } from '@xenova/transformers'
+import { getModelFile, getModelJSON } from '../hub/hub'
 
 async function getModelTextFile (modelPath: string, fileName: string, fatal: boolean, options: any) {
   let buffer = await getModelFile(modelPath, fileName, fatal, options);
@@ -22,13 +21,17 @@ interface TokenizerOptions {
   return_tensor_dtype?: string
 }
 
+interface ClipPreTrainedOptions extends PretrainedOptions {
+  subdir?: string
+}
+
 export class CLIPTokenizer extends PreTrainedTokenizer {
   private bos_token_id?: number
   private eos_token_id?: number
   constructor (tokenizerJSON: unknown, tokenizerConfig: unknown) {
     super(tokenizerJSON, tokenizerConfig)
     this.added_tokens_regex = /<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+/gui
-    this.pad_token_id = 0
+    // this.pad_token_id = 0
 
     const bos_token = this.getToken(tokenizerConfig, 'bos_token');
     if (bos_token) {
@@ -255,12 +258,12 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
     }).flat()
   }
 
-  static async from_pretrained (pretrained_model_name_or_path: string, options = {}) {
+  static async from_pretrained (pretrained_model_name_or_path: string, options: ClipPreTrainedOptions = { subdir: 'tokenizer' }) {
     let [vocab, tokens, merges, tokenizerConfig] = await Promise.all([
-      getModelJSON(pretrained_model_name_or_path, 'tokenizer/vocab.json', true, options),
-      getModelJSON(pretrained_model_name_or_path, 'tokenizer/special_tokens_map.json', true, options),
-      getModelTextFile(pretrained_model_name_or_path, 'tokenizer/merges.txt', true, options),
-      getModelJSON(pretrained_model_name_or_path, 'tokenizer/tokenizer_config.json', true, options),
+      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/vocab.json`, true, options),
+      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/special_tokens_map.json`, true, options),
+      getModelTextFile(pretrained_model_name_or_path, `${options.subdir}/merges.txt`, true, options),
+      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/tokenizer_config.json`, true, options),
     ])
     const tokenizerJSON = {
       normalizer: {

@@ -23,4 +23,7 @@ yarn-debug.log*
 yarn-error.log*
 
 /.idea
-/public/models/aislamov1
+/examples/react/public/models/
+/examples/react/public/static/js
+/examples/react/node_modules
+/dist
