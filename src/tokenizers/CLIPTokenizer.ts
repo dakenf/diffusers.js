@@ -1,16 +1,5 @@
-import { PretrainedOptions, PreTrainedTokenizer, Tensor } from '@xenova/transformers'
-import { getModelFile, getModelJSON } from '../hub/hub'
-
-async function getModelTextFile (modelPath: string, fileName: string, fatal: boolean, options: any) {
-  let buffer = await getModelFile(modelPath, fileName, fatal, options);
-  if (buffer === null || buffer === undefined) {
-    // Return empty object
-    return null
-  }
-
-  let decoder = new TextDecoder('utf-8');
-  return decoder.decode(buffer);
-}
+import { PreTrainedTokenizer, PretrainedOptions, Tensor } from '@xenova/transformers'
+import { getModelJSON, getModelTextFile } from '@/hub'
 
 interface TokenizerOptions {
   text_pair?: null|string
@@ -23,29 +12,29 @@ interface TokenizerOptions {
 
 interface ClipPreTrainedOptions extends PretrainedOptions {
   subdir?: string
+  revision?: string
 }
 
 export class CLIPTokenizer extends PreTrainedTokenizer {
-  private bos_token_id?: number
-  private eos_token_id?: number
+  private readonly bos_token_id?: number
+  private readonly eos_token_id?: number
   constructor (tokenizerJSON: unknown, tokenizerConfig: unknown) {
     super(tokenizerJSON, tokenizerConfig)
     this.added_tokens_regex = /<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+/gui
     // this.pad_token_id = 0
 
-    const bos_token = this.getToken(tokenizerConfig, 'bos_token');
+    const bos_token = this.getToken(tokenizerConfig, 'bos_token')
     if (bos_token) {
-      this.bos_token_id = this.model.tokens_to_ids.get(bos_token);
+      this.bos_token_id = this.model.tokens_to_ids.get(bos_token)
     }
 
-    const eos_token = this.getToken(tokenizerConfig, 'eos_token');
+    const eos_token = this.getToken(tokenizerConfig, 'eos_token')
     if (eos_token) {
-      this.eos_token_id = this.model.tokens_to_ids.get(eos_token);
+      this.eos_token_id = this.model.tokens_to_ids.get(eos_token)
     }
   }
 
-  // @ts-ignore
-  _call(
+  _call (
     // Required positional arguments
     text: string,
 
@@ -59,9 +48,8 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
       return_tensor = true, // Different to HF
       return_tensor_dtype = 'int64',
     }: TokenizerOptions = {},
-  ): { input_ids: number[]|number[][]|Tensor, attention_mask: any[]|Tensor } {
-
-    let tokens: number[][];
+  ): { input_ids: number[]|number[][]|Tensor, attention_mask: Tensor[]|Tensor } {
+    let tokens: number[][]
 
     if (Array.isArray(text)) {
       if (text.length === 0) {
@@ -71,19 +59,16 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
       if (text_pair !== null) {
         if (!Array.isArray(text_pair)) {
           throw Error('text_pair must also be an array')
-
         } else if (text.length !== text_pair.length) {
           throw Error('text and text_pair must have the same length')
         }
 
         tokens = text.map(
-          (t, i) => this.encode(t, text_pair[i])
+          (t, i) => this.encode(t, text_pair[i]),
         )
-
       } else {
-        tokens = text.map(x => this.encode(x));
+        tokens = text.map(x => this.encode(x))
       }
-
     } else {
       if (text === null) {
         throw Error('text may not be null')
@@ -94,16 +79,16 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
       }
 
       // For single input, we just wrap in an array, and then unwrap later.
-      tokens = [this.encode(text, text_pair)];
+      tokens = [this.encode(text, text_pair)]
     }
     // At this point, tokens is batched: [batch_size, tokens]
     // However, array may be jagged. So, we pad to max_length
 
-    let maxLengthOfBatch = Math.max(...tokens.map(x => x.length));
+    const maxLengthOfBatch = Math.max(...tokens.map(x => x.length))
 
     // If null, we calculate max length from sequences
     if (max_length === null) {
-      max_length = maxLengthOfBatch;
+      max_length = maxLengthOfBatch
     }
 
     // Ensure it is less than model max length
@@ -111,46 +96,43 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
 
     if (this.bos_token_id) {
       // Add the BOS token
-      tokens = tokens.map(x => [this.bos_token_id!].concat(x));
+      tokens = tokens.map(x => [this.bos_token_id!].concat(x))
     }
 
     if (this.eos_token_id) {
       // Add the EOS token
-      tokens = tokens.map(x => x.concat([this.eos_token_id!]));
+      tokens = tokens.map(x => x.concat([this.eos_token_id!]))
     }
 
     /** @type {any[]|Tensor} */
-    let attention_mask = [];
+    let attention_mask = []
     if (padding || truncation) {
       // Perform padding and/or truncation
       for (let i = 0; i < tokens.length; ++i) {
         if (tokens[i].length === max_length) {
           attention_mask.push(new Array(tokens[i].length).fill(1))
-          continue;
-
+          continue
         } else if (tokens[i].length > max_length) {
           // possibly truncate
           if (truncation) {
-            tokens[i] = tokens[i].slice(0, max_length);
+            tokens[i] = tokens[i].slice(0, max_length)
           }
           attention_mask.push(new Array(tokens[i].length).fill(1))
-
         } else { // t.length < max_length
           if (padding) {
-            let diff = max_length - tokens[i].length;
+            const diff = max_length - tokens[i].length
 
             if (this.padding_side === 'right') {
               attention_mask.push(
-                (new Array(tokens[i].length).fill(1)).concat(new Array(diff).fill(0))
+                (new Array(tokens[i].length).fill(1)).concat(new Array(diff).fill(0)),
               )
               tokens[i].push(...new Array(diff).fill(this.pad_token_id))
             } else { // left
               attention_mask.push(
-                (new Array(diff).fill(0)).concat(new Array(tokens[i].length).fill(1))
+                (new Array(diff).fill(0)).concat(new Array(tokens[i].length).fill(1)),
               )
               tokens[i].unshift(...new Array(diff).fill(this.pad_token_id))
             }
-
           } else {
             attention_mask.push(new Array(tokens[i].length).fill(1))
           }
@@ -167,8 +149,8 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
 
         if (tokens.some(x => x.length !== tokens[0].length)) {
           throw Error(
-            "Unable to create tensor, you should probably activate truncation and/or padding " +
-            "with 'padding=true' and 'truncation=true' to have batched tensors with the same length."
+            'Unable to create tensor, you should probably activate truncation and/or padding ' +
+            "with 'padding=true' and 'truncation=true' to have batched tensors with the same length.",
           )
         }
       }
@@ -176,33 +158,33 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
       // Now we actually convert to tensor
       // NOTE: In the same way as the python library, we return a batched tensor, regardless of
       // whether we have a single input or multiple inputs.
-      let dims = [tokens.length, tokens[0].length];
+      const dims = [tokens.length, tokens[0].length]
 
       if (return_tensor_dtype === 'int32') {
         // @ts-ignore
         tokens = new Tensor(return_tensor_dtype,
           Int32Array.from(tokens.flat()),
-          dims
-        );
+          dims,
+        )
 
         // @ts-ignore
         attention_mask = new Tensor(
           return_tensor_dtype,
           Int32Array.from(attention_mask.flat()),
-          dims
+          dims,
         )
       } else {
         // @ts-ignore
         tokens = new Tensor(return_tensor_dtype,
           BigInt64Array.from(tokens.flat().map(BigInt)),
-          dims
-        );
+          dims,
+        )
 
         // @ts-ignore
         attention_mask = new Tensor(
           return_tensor_dtype,
           BigInt64Array.from(attention_mask.flat().map(BigInt)),
-          dims
+          dims,
         )
       }
     } else {
@@ -210,20 +192,19 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
       if (!Array.isArray(text)) {
         // Input was not batched, so we unwrap
         // @ts-ignore
-        tokens = tokens[0];
-        attention_mask = attention_mask[0];
+        tokens = tokens[0]
+        attention_mask = attention_mask[0]
       }
     }
-
 
     // Finally, add attention mask, and possibly model-specific parameters
     let modelInputs = {
       input_ids: tokens,
-      attention_mask: attention_mask
+      attention_mask,
     }
 
     // Optional post-processing
-    modelInputs = this.prepare_model_inputs(modelInputs);
+    modelInputs = this.prepare_model_inputs(modelInputs)
 
     return modelInputs
   }
@@ -259,11 +240,11 @@ export class CLIPTokenizer extends PreTrainedTokenizer {
   }
 
   static async from_pretrained (pretrained_model_name_or_path: string, options: ClipPreTrainedOptions = { subdir: 'tokenizer' }) {
-    let [vocab, tokens, merges, tokenizerConfig] = await Promise.all([
-      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/vocab.json`, true, options),
-      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/special_tokens_map.json`, true, options),
-      getModelTextFile(pretrained_model_name_or_path, `${options.subdir}/merges.txt`, true, options),
-      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/tokenizer_config.json`, true, options),
+    const [vocab, merges, tokenizerConfig] = await Promise.all([
+      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/vocab.json`, true, { revision: options.revision }),
+      // getModelJSON(pretrained_model_name_or_path, `${options.subdir}/special_tokens_map.json`, true, options),
+      getModelTextFile(pretrained_model_name_or_path, `${options.subdir}/merges.txt`, true, { revision: options.revision }),
+      getModelJSON(pretrained_model_name_or_path, `${options.subdir}/tokenizer_config.json`, true, { revision: options.revision }),
     ])
     const tokenizerJSON = {
       normalizer: {

@@ -1,7 +1,7 @@
 import * as ORT from 'onnxruntime-node'
-import { StableDiffusionXLPipeline } from '../../../lib/StableDiffusionXLPipeline'
+import { StableDiffusionXLPipeline } from '../../../pipelines/StableDiffusionXLPipeline'
 import * as fs from 'fs'
-import { CLIPTokenizer } from '../../../lib/tokenizers/CLIPTokenizer'
+import { CLIPTokenizer } from '../../../tokenizers/CLIPTokenizer'
 
 // https://github.com/microsoft/onnxruntime/issues/16622
 const originalImplementation = Array.isArray;

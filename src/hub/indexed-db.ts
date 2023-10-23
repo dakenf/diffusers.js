@@ -1,4 +1,4 @@
-import { openDB, deleteDB, wrap, unwrap, IDBPDatabase } from 'idb'
+import { IDBPDatabase, openDB } from 'idb'
 
 interface FileMetadata {
   chunks: number;
@@ -8,28 +8,28 @@ interface FileMetadata {
   file: ArrayBuffer;
 }
 
-const DEFAULT_CHUNK_LENGTH = 1024 * 1024 * 512;
+const DEFAULT_CHUNK_LENGTH = 1024 * 1024 * 512
 
 export class DbCache {
-  dbName = "diffusers-cache";
-  dbVersion = 1;
+  dbName = 'diffusers-cache'
+  dbVersion = 1
   db!: IDBPDatabase
 
   init = async () => {
     const openRequest = await openDB(this.dbName, this.dbVersion, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains("files")) {
-          db.createObjectStore("files");
+      upgrade (db) {
+        if (!db.objectStoreNames.contains('files')) {
+          db.createObjectStore('files')
         }
       },
     })
 
-    this.db = openRequest;
+    this.db = openRequest
   }
 
   storeFile = async (file: ArrayBuffer, name: string, chunkLength = DEFAULT_CHUNK_LENGTH) => {
-    const transaction = this.db.transaction(["files"], "readwrite");
-    const store = transaction.objectStore("files");
+    const transaction = this.db.transaction(['files'], 'readwrite')
+    const store = transaction.objectStore('files')
 
     const chunks = Math.ceil(file.byteLength / chunkLength)
 
@@ -41,26 +41,26 @@ export class DbCache {
 
     for (let i = 0; i < chunks; i++) {
       const chunk = file.slice(i * chunkLength, (i + 1) * chunkLength)
-      const nameSuffix = i > 0 ? `-${i}` : '';
-      const thisChunkLength = chunk.byteLength;
-      await store.put({ ...fileMetadata, chunkLength: thisChunkLength, file: chunk, chunk: i }, `${name}${nameSuffix}`);
+      const nameSuffix = i > 0 ? `-${i}` : ''
+      const thisChunkLength = chunk.byteLength
+      await store.put({ ...fileMetadata, chunkLength: thisChunkLength, file: chunk, chunk: i }, `${name}${nameSuffix}`)
     }
     await transaction.done
   }
 
-  retrieveFile = async (filename: string, noChunks = false): Promise<FileMetadata | null> => {
-    const transaction = this.db.transaction(["files"], "readonly");
-    const store = transaction.objectStore("files");
-    const request = await store.get(filename) as FileMetadata;
+  retrieveFile = async (filename: string): Promise<FileMetadata | null> => {
+    const transaction = this.db.transaction(['files'], 'readonly')
+    const store = transaction.objectStore('files')
+    const request = await store.get(filename) as FileMetadata
     if (!request) {
-      return null;
+      return null
     }
 
     if (request.chunks === 1) {
-      return request;
+      return request
     }
 
-    let buffer: ArrayBuffer;
+    let buffer: ArrayBuffer
     if (request.totalLength > 2 * 1024 * 1024 * 1024) {
       // @ts-ignore
       const memory = new WebAssembly.Memory({ initial: Math.ceil(request.totalLength / 65536), index: 'i64' })

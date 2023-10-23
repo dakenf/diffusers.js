@@ -11,102 +11,21 @@ import CssBaseline from '@mui/material/CssBaseline';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import Alert from '@mui/material/Alert';
 import Stack from '@mui/material/Stack';
 import Grid from '@mui/material/Grid';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
-import List from '@mui/material/List';
-import ListItem from '@mui/material/ListItem';
-import ListItemText from '@mui/material/ListItemText';
 import Divider from '@mui/material/Divider';
 import { Checkbox } from '@mui/material';
 import { FormControlLabel } from '@mui/material';
-import { memory64 } from "wasm-feature-detect"
+import { BrowserFeatures } from './components/BrowserFeatures'
+import { FAQ } from './components/FAQ'
 
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
   },
 });
-
-function FaqItem (props: { question: string, answer:string }){
-  return (
-    <>
-      <ListItem>
-        <ListItemText primary={'Q: ' + props.question} />
-      </ListItem>
-      <ListItem>
-        <ListItemText primary={'A: ' + props.answer} />
-      </ListItem>
-      <Divider/>
-    </>
-  )
-}
-
-function FAQ () {
-  return (
-    <Box sx={{ width: '100%', bgcolor: 'background.paper' }}>
-      <List>
-        <ListItem>
-          <h2>FAQ</h2>
-        </ListItem>
-        <FaqItem question={'What if I get protobuf parsing failed error?'} answer={'Open DevTools, go to Application -> Storage and press "Clear site data".'} />
-        <FaqItem question={'What if I get sbox_fatal_memory_exceeded?'} answer={"You don't have enough RAM to run SD. You can try reloading the tab or browser."} />
-        <FaqItem question={'How did you make it possible?'} answer={'In order to run it, I had to port StableDiffusionPipeline from python to JS. Then patch onnxruntime and emscripten+binaryen (WebAssembly compiler toolchain) to support allocating and using >4GB memory. Once my pull requests get to release, anyone would be able to compile and run code that uses >4GB in the browser.'} />
-        <FaqItem question={'Why is it so slow?'} answer={'It does not support multi-threading yet, so is using just one CPU core. There is no way to create 64 bit memory with SharedArrayBuffer through WebAssembly.Memory constructor. I’ve proposed a spec change to have “memory64” flag and after it’s accepted, i will patch V8 engine to support it.'} />
-        <FaqItem question={'But it’s running on a GPU, right?'} answer={'Yes, but webgpu is onnxruntime is in early stage, so a lot of operations are not yet implemented. And data is constantly transferred from and to CPU through JS. Once the majority of operations will have their JS kernels, it will be way faster.'} />
-        <FaqItem question={'Can I run it locally?'} answer={'Yes, this page’s code is available here: https://github.com/dakenf/stable-diffusion-webgpu-minimal'} />
-        <FaqItem question={'Can I use your patched onnxruntime to run big LLMs with transformers.js?'} answer={'Yes, you can use this package but i don’t guarantee it will be working in all cases. This build is limited to 8GB of memory, so you can load up to ~4GB weights. Just use https://www.npmjs.com/package/@aislamov/onnxruntime-web64'} />
-        <FaqItem question={'Are you going to make a pull request in onnxruntime repo?'} answer={'Yes. It will be my second one, i’ve added GPU acceleration to node.js binding earlier.'} />
-      </List>
-    </Box>
-  )
-}
-
-const BrowserFeatures = () => {
-  const [hasMemory64, setHasMemory64] = useState(false);
-  const [hasSharedMemory64, setHasSharedMemory64] = useState(false);
-  const [hasJspi, setHasJspi] = useState(false);
-  const [hasF16, setHasF16] = useState(false);
-  const [hasGpu, setHasGpu] = useState(false);
-
-  useEffect(() => {
-    memory64().then(value => setHasMemory64(value))
-    // @ts-ignore
-    setHasJspi(typeof WebAssembly.Function !== 'undefined')
-
-    try {
-      // @ts-ignore
-      const mem = new WebAssembly.Memory({ initial: 1, maximum: 2, shared: true, index: 'i64' })
-      // @ts-ignore
-      setHasSharedMemory64(mem.type().index === 'i64')
-    } catch (e) {
-      //
-    }
-
-    try {
-      // @ts-ignore
-      navigator.gpu.requestAdapter().then((adapter) => {
-        setHasF16(adapter.features.has('shader-f16'))
-      })
-      setHasGpu(true)
-    } catch (e) {
-      //
-    }
-
-  }, [])
-
-  return (
-    <Stack>
-      {!hasMemory64 && <Alert severity="error">You need latest Chrome with "Experimental WebAssembly" flag enabled!</Alert>}
-      {!hasJspi && <Alert severity="error">You need "Experimental WebAssembly JavaScript Promise Integration (JSPI)" flag enabled!</Alert>}
-      {!hasSharedMemory64 && <Alert severity="error">You need Chrome Canary 119 or newer!</Alert>}
-      {!hasF16 && <Alert severity="error">You need to run chrome with --enable-dawn-features=allow_unsafe_apis on linux/mac or with --enable-dawn-features=allow_unsafe_apis,use_dxc on windows!</Alert>}
-      {!hasGpu && <Alert severity="error">You need a browser with WebGPU support!</Alert>}
-    </Stack>
-  )
-}
 
 function App() {
   const [modelState, setModelState] = useState<'none'|'loading'|'ready'|'inferencing'>('none');
@@ -143,7 +62,7 @@ function App() {
     }
     setModelState('loading')
     // StableDiffusionXLPipeline.fromPretrained('webgpu', 'aislamov/sdxl-base-fp16', progressCallback)
-    StableDiffusionPipeline.fromPretrained('webgpu', 'aislamov/sd2_1base-fp16', progressCallback)
+    StableDiffusionPipeline.fromPretrained('aislamov/sd2_1base-fp16', 'main', progressCallback)
       .then((p) => {
         pipeline.current = p
         setModelState('ready')
@@ -229,7 +148,7 @@ function App() {
     <ThemeProvider theme={darkTheme}>
       <CssBaseline enableColorScheme={true} />
       <Container>
-        <BrowserFeatures/>
+        <BrowserFeatures />
         <Box sx={{ bgcolor: '#282c34' }} pt={4} pl={3} pr={3} pb={4}>
           <Grid container spacing={2}>
             <Grid item xs={6}>

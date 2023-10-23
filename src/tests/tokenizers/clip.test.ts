@@ -1,4 +1,4 @@
-import { CLIPTokenizer } from '../../lib/tokenizers/CLIPTokenizer'
+import { CLIPTokenizer } from '../../tokenizers/CLIPTokenizer'
 import { Tensor } from '@xenova/transformers'
 
 const downloadOpts = {

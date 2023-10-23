@@ -1,0 +1,15 @@
+{
+  "name": "@aislamov/diffusers.js-node-example",
+  "version": "1.0",
+  "private": false,
+  "homepage": ".",
+  "dependencies": {
+    "@aislamov/diffusers.js": "file:../..",
+    "cli-progress": "^3.12.0",
+    "minimist": "^1.2.8",
+    "pngjs": "^7.0.0"
+  },
+  "scripts": {
+    "txt2img": "node src/txt2img.ts"
+  }
+}
