@@ -1,0 +1,16 @@
+/.vscode/
+/.idea/
+/script/
+/src/tests/
+
+/dist/**/*.report.html
+
+/examples/
+/public/
+
+tsconfig.json
+tsconfig.tsbuildinfo
+babel.config.cjs
+jest.config.cjs
+
+*.tgz
