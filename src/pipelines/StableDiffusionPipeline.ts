@@ -1,10 +1,11 @@
-import { PNDMScheduler, SchedulerConfig } from '../lib/schedulers/PNDMScheduler'
+import { PNDMScheduler, SchedulerConfig } from '@/schedulers/PNDMScheduler'
 import { CLIPTokenizer } from '../tokenizers/CLIPTokenizer'
-import { cat, randomNormalTensor } from '../lib/Tensor'
+import { cat, randomNormalTensor } from '@/util/Tensor'
 import { Tensor } from '@xenova/transformers'
-import { ProgressCallback } from './common'
+import { dispatchProgress, PretrainedOptions, ProgressCallback, ProgressStatus } from './common'
 import { getModelFile, getModelJSON } from '@/hub'
 import { Session } from '@/backends'
+import { GetModelFileOptions } from '@/hub/common'
 
 export interface StableDiffusionInput {
   prompt: string
@@ -24,17 +25,17 @@ export interface StableDiffusionInput {
 
 export class StableDiffusionPipeline {
   public unet: Session
-  public vae: Session
-  public vae_encoder: Session
+  public vaeDecoder: Session
+  public vaeEncoder: Session
   public textEncoder: Session
   public tokenizer: CLIPTokenizer
   public scheduler: PNDMScheduler
   private sdVersion
 
-  constructor (unet: Session, vae: Session, vae_encoder: Session, textEncoder: Session, tokenizer: CLIPTokenizer, scheduler: PNDMScheduler, sdVersion: 1 | 2 = 2) {
+  constructor (unet: Session, vaeDecoder: Session, vaeEncoder: Session, textEncoder: Session, tokenizer: CLIPTokenizer, scheduler: PNDMScheduler, sdVersion: 1 | 2 = 2) {
     this.unet = unet
-    this.vae = vae
-    this.vae_encoder = vae_encoder
+    this.vaeDecoder = vaeDecoder
+    this.vaeEncoder = vaeEncoder
     this.textEncoder = textEncoder
     this.tokenizer = tokenizer
     this.scheduler = scheduler
@@ -54,40 +55,25 @@ export class StableDiffusionPipeline {
     return new Promise(resolve => setTimeout(resolve, ms))
   }
 
-  static async fromPretrained (modelRepoOrPath: string, revision = 'main', progressCallback?: ProgressCallback) {
-    const hubProgressCallback = (data: { status: string, file: string, progress: number }) => {
-      if (data.status === 'progress') {
-        progressCallback({
-          step: `Downloading ${data.file}, ${Math.round(data.progress)}%`,
-        })
-      } else {
-        progressCallback({
-          step: `Downloaded ${data.file}`,
-        })
-      }
+  static async fromPretrained (modelRepoOrPath: string, options?: PretrainedOptions) {
+    const opts: GetModelFileOptions = {
+      ...options,
     }
 
-    const opts = {
-      progress_callback: hubProgressCallback,
-      revision,
-      // local_files_only: true
-    }
-
-    const textEncoder = await Session.create(await getModelFile(modelRepoOrPath, 'text_encoder/model.onnx', true, opts))
-    const vae_encoder = await Session.create(await getModelFile(modelRepoOrPath, 'vae_encoder/model.onnx', true, opts))
-    const vae = await Session.create(await getModelFile(modelRepoOrPath, 'vae_decoder/model.onnx', true, opts))
+    // order matters because WASM memory cannot be decreased. so we load the biggset one first
     const unet = await Session.create(await getModelFile(modelRepoOrPath, 'unet/model.onnx', true, opts))
+    const textEncoder = await Session.create(await getModelFile(modelRepoOrPath, 'text_encoder/model.onnx', true, opts))
+    const vaeEncoder = await Session.create(await getModelFile(modelRepoOrPath, 'vae_encoder/model.onnx', true, opts))
+    const vae = await Session.create(await getModelFile(modelRepoOrPath, 'vae_decoder/model.onnx', true, opts))
 
     const schedulerConfig = await getModelJSON(modelRepoOrPath, 'scheduler/scheduler_config.json', true, opts)
     const scheduler = StableDiffusionPipeline.createScheduler(schedulerConfig)
 
     const tokenizer = await CLIPTokenizer.from_pretrained(modelRepoOrPath, { ...opts, subdir: 'tokenizer' })
-    if (progressCallback) {
-      progressCallback({
-        step: 'Ready',
-      })
-    }
-    return new StableDiffusionPipeline(unet, vae, vae_encoder, textEncoder, tokenizer, scheduler, 2)
+    await dispatchProgress(opts.progressCallback, {
+      status: ProgressStatus.Ready,
+    })
+    return new StableDiffusionPipeline(unet, vae, vaeEncoder, textEncoder, tokenizer, scheduler, 2)
   }
 
   async encodePrompt (prompt: string): Promise<Tensor> {
@@ -120,13 +106,10 @@ export class StableDiffusionPipeline {
     const batchSize = 1
     const guidanceScale = input.guidanceScale || 7.5
     const seed = input.seed || ''
-
-    const progressCallback = input.progressCallback || (() => {})
-
     this.scheduler.setTimesteps(input.numInferenceSteps || 5)
 
-    await progressCallback({
-      step: 'Encoding prompt...',
+    await dispatchProgress(input.progressCallback, {
+      status: ProgressStatus.EncodingPrompt,
     })
 
     const promptEmbeds = await this.getPromptEmbeds(input.prompt, input.negativePrompt)
@@ -139,20 +122,20 @@ export class StableDiffusionPipeline {
       const inputImage = input.inputImage || new Float32Array()
       const strength = input.strength || 0.8
 
-      await progressCallback({
-        step: 'Encoding input image...',
+      await dispatchProgress(input.progressCallback, {
+        status: ProgressStatus.EncodingImg2Img,
       })
 
-      const imageLatent = await this.encodeImage(inputImage) // Encode image to latent space
+      const imageLatent = await this.encodeImage(inputImage, input.width, input.height) // Encode image to latent space
 
       // Taken from https://towardsdatascience.com/stable-diffusion-using-hugging-face-variations-of-stable-diffusion-56fd2ab7a265#2d1d
-      const init_timestep = Math.round(input.numInferenceSteps * strength)
-      const timestep = timesteps.toReversed()[init_timestep]
+      const initTimestep = Math.round(input.numInferenceSteps * strength)
+      const timestep = timesteps.toReversed()[initTimestep]
 
       latents = this.scheduler.add_noise(imageLatent, latents, timestep)
       // Computing the timestep to start the diffusion loop
-      const t_start = Math.max(input.numInferenceSteps - init_timestep, 0)
-      timesteps = timesteps.slice(t_start)
+      const tStart = Math.max(input.numInferenceSteps - initTimestep, 0)
+      timesteps = timesteps.slice(tStart)
     }
 
     const doClassifierFreeGuidance = guidanceScale > 1
@@ -165,8 +148,10 @@ export class StableDiffusionPipeline {
       const timestep = input.sdV1
         ? new Tensor(BigInt64Array.from([BigInt(step)]))
         : new Tensor(new Float32Array([step]))
-      await progressCallback!({
-        step: `Running unet step ${humanStep}`,
+      await dispatchProgress(input.progressCallback, {
+        status: ProgressStatus.RunningUnet,
+        unetTimestep: humanStep,
+        unetTotalSteps: timesteps.length,
       })
       const latentInput = doClassifierFreeGuidance ? cat([latents, latents.clone()]) : latents
 
@@ -189,27 +174,20 @@ export class StableDiffusionPipeline {
         latents,
       )
 
-      if (progressCallback) {
-        if (input.runVaeOnEachStep) {
-          await progressCallback({
-            step: 'Running vae...',
-            unetTimestep: humanStep,
-          })
-          cachedImages = await this.makeImages(latents)
-          await progressCallback({
-            step: 'Finished step ' + humanStep,
-            unetTimestep: humanStep,
-            images: cachedImages,
-          })
-        } else {
-          await progressCallback({
-            step: 'Finished step ' + humanStep,
-            unetTimestep: humanStep,
-          })
-        }
+      if (input.runVaeOnEachStep) {
+        await dispatchProgress(input.progressCallback, {
+          status: ProgressStatus.RunningVae,
+          unetTimestep: humanStep,
+          unetTotalSteps: timesteps.length,
+        })
+        cachedImages = await this.makeImages(latents)
       }
       humanStep++
     }
+
+    await dispatchProgress(input.progressCallback, {
+      status: ProgressStatus.Done,
+    })
 
     if (input.runVaeOnEachStep) {
       return cachedImages!
@@ -221,7 +199,7 @@ export class StableDiffusionPipeline {
   async makeImages (latents: Tensor) {
     latents = latents.mul(1 / 0.18215)
 
-    const decoded = await this.vae.run(
+    const decoded = await this.vaeDecoder.run(
       { latent_sample: latents },
     )
 
@@ -235,10 +213,9 @@ export class StableDiffusionPipeline {
     return [images]
   }
 
-  // Taken from https://colab.research.google.com/github/fastai/diffusion-nbs/blob/master/Stable%20Diffusion%20Deep%20Dive.ipynb#scrollTo=42d594a2-cc70-4daf-81eb-005e906118d3&line=4&uniqifier=1
-  async encodeImage (inputImage: Float32Array) {
-    const encoded = await this.vae_encoder.run(
-      { sample: new Tensor('float32', inputImage, [1, 3, 512, 512]) },
+  async encodeImage (inputImage: Float32Array, width: number, height: number) {
+    const encoded = await this.vaeEncoder.run(
+      { sample: new Tensor('float32', inputImage, [1, 3, width, height]) },
     )
 
     const encodedImage = encoded.latent_sample

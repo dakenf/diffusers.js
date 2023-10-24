@@ -21,8 +21,9 @@ async function main() {
   const args = parseCommandLineArgs();
   const pipe = await StableDiffusionPipeline.fromPretrained(
     args.m,
-    args.rev,
-    async () => {}
+    {
+      revision: args.rev,
+    }
   )
 
   const progressBar = new progress.SingleBar({

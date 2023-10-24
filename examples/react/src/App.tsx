@@ -20,6 +20,7 @@ import { Checkbox } from '@mui/material';
 import { FormControlLabel } from '@mui/material';
 import { BrowserFeatures } from './components/BrowserFeatures'
 import { FAQ } from './components/FAQ'
+import { Tensor } from '@xenova/transformers'
 
 const darkTheme = createTheme({
   palette: {
@@ -44,33 +45,41 @@ function App() {
     setModelCacheDir('models')
   }, [])
 
-  const progressCallback = async (info: ProgressCallbackPayload) => {
-    if (info.step) {
-      setStatus(info.step)
-    }
-    if (info.images) {
-      const canvas = document.getElementById('canvas') as HTMLCanvasElement
-      if (canvas) {
-        const data = await info.images[0].toImageData({ tensorLayout: 'NCWH', format: 'RGB' });
-        canvas.getContext('2d')!.putImageData(data, 0, 0);
-      }
+  const drawImage = async (image: Tensor) => {
+    const canvas = document.getElementById('canvas') as HTMLCanvasElement
+    if (canvas) {
+      const data = await image.toImageData({ tensorLayout: 'NCWH', format: 'RGB' });
+      canvas.getContext('2d')!.putImageData(data, 0, 0);
     }
   }
-  const loadModel = () => {
+
+  const progressCallback = async (info: ProgressCallbackPayload) => {
+    if (info.statusText) {
+      setStatus(info.statusText)
+    }
+
+    if (info.images) {
+      await drawImage(info.images[0])
+    }
+  }
+
+  const loadModel = async () => {
     if (!window.confirm('This will download approximately 2.5gb, use about 5gb of your RAM and up to 12gb VRAM. Are you sure want to continue?')) {
       return
     }
     setModelState('loading')
-    // StableDiffusionXLPipeline.fromPretrained('webgpu', 'aislamov/sdxl-base-fp16', progressCallback)
-    StableDiffusionPipeline.fromPretrained('aislamov/sd2_1base-fp16', 'main', progressCallback)
-      .then((p) => {
-        pipeline.current = p
-        setModelState('ready')
-      })
-      .catch(e => {
-        alert(e)
-        console.error(e)
-      })
+    try {
+      pipeline.current = await StableDiffusionPipeline.fromPretrained(
+        'aislamov/stable-diffusion-2-1-base-onnx',
+        {
+          progressCallback
+        }
+      )
+      setModelState('ready')
+    } catch (e) {
+      alert(e)
+      console.error(e)
+    }
   }
 
   function getRgbData(d: Uint8ClampedArray) {
@@ -115,15 +124,15 @@ function App() {
       uploadedImage.src = file.target.result;
     });
     reader.readAsDataURL(e.target.files[0]);
-  };
+  }
 
-  const runInference = () => {
+  const runInference = async () => {
     if (!pipeline.current) {
       return
     }
     setModelState('inferencing')
 
-    pipeline.current.run({
+    const images = await pipeline.current.run({
       prompt: prompt,
       negativePrompt: negativePrompt,
       numInferenceSteps: inferenceSteps,
@@ -136,14 +145,11 @@ function App() {
       img2imgFlag: img2img,
       inputImage: inputImage,
       strength: strength
-    }).then(images => {
-      progressCallback({
-        step: 'Done',
-        images,
-      })
-      setModelState('ready')
     })
+    await drawImage(images[0])
+    setModelState('ready')
   }
+
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline enableColorScheme={true} />

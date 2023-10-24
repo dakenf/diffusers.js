@@ -3,7 +3,7 @@ import * as esbuild from 'esbuild'
 await esbuild.build({
   entryPoints: ['src/index.ts'],
   bundle: true,
-  outfile: 'dist/index.cjs',
+  outfile: 'dist/index.js',
   platform: 'browser',
   packages: 'external',
 })

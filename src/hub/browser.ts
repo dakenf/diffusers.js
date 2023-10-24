@@ -1,6 +1,7 @@
 import { downloadFile } from '@huggingface/hub'
 import { DbCache } from '@/hub/indexed-db'
 import { GetModelFileOptions, pathJoin } from '@/hub/common'
+import { dispatchProgress, ProgressCallback, ProgressStatus } from '@/pipelines/common'
 
 let cacheDir = ''
 export function setModelCacheDir (dir: string) {
@@ -16,7 +17,7 @@ export async function getModelFile (modelRepoOrPath: string, fileName: string, f
   const cachePath = getCacheKey(modelRepoOrPath, fileName, revision)
   const cache = new DbCache()
   await cache.init()
-  const cachedData = await cache.retrieveFile(cachePath)
+  const cachedData = await cache.retrieveFile(cachePath, options.progressCallback, fileName)
   if (cachedData) {
     if (options.returnText) {
       const decoder = new TextDecoder('utf-8')
@@ -47,7 +48,7 @@ export async function getModelFile (modelRepoOrPath: string, fileName: string, f
       throw new Error(`Error downloading ${fileName}`)
     }
 
-    const buffer = await readResponseToBuffer(response)
+    const buffer = await readResponseToBuffer(response, options.progressCallback, fileName)
     await cache.storeFile(buffer, cachePath)
     if (options.returnText) {
       const decoder = new TextDecoder('utf-8')
@@ -63,7 +64,7 @@ export async function getModelFile (modelRepoOrPath: string, fileName: string, f
   }
 }
 
-function readResponseToBuffer (response: Response): Promise<ArrayBuffer> {
+function readResponseToBuffer (response: Response, progressCallback: ProgressCallback, displayName: string): Promise<ArrayBuffer> {
   const contentLength = response.headers.get('content-length')
   if (!contentLength) {
     return response.arrayBuffer()
@@ -84,16 +85,23 @@ function readResponseToBuffer (response: Response): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
     const reader = response.body!.getReader()
 
-    function pump (): Promise<void> {
-      return reader.read().then(({ done, value }) => {
-        if (done) {
-          return resolve(buffer)
+    async function pump (): Promise<void> {
+      const { done, value } = await reader.read()
+      if (done) {
+        return resolve(buffer)
+      }
+      const chunk = new Uint8Array(buffer, offset, value.byteLength)
+      chunk.set(new Uint8Array(value))
+      offset += value.byteLength
+      await dispatchProgress(progressCallback, {
+        status: ProgressStatus.Downloading,
+        downloadStatus: {
+          file: displayName,
+          size: contentLengthNum,
+          downloaded: offset,
         }
-        const chunk = new Uint8Array(buffer, offset, value.byteLength)
-        chunk.set(new Uint8Array(value))
-        offset += value.byteLength
-        return pump()
       })
+      return pump()
     }
 
     pump().catch(reject)

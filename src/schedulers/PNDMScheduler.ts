@@ -1,4 +1,4 @@
-import { cat, linspace, range } from '../Tensor'
+import { cat, linspace, range } from '@/util/Tensor'
 import { Tensor } from '@xenova/transformers'
 
 export interface SchedulerConfig {

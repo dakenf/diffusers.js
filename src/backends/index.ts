@@ -1,6 +1,6 @@
 import * as ORT from '@aislamov/onnxruntime-web64'
 import type { InferenceSession } from 'onnxruntime-common'
-import { replaceTensors } from '../lib/Tensor'
+import { replaceTensors } from '@/util/Tensor'
 import { Tensor } from '@xenova/transformers'
 
 // @ts-ignore
@@ -10,7 +10,7 @@ const isNode = typeof process !== 'undefined' && process?.release?.name === 'nod
 
 const onnxSessionOptions = isNode
   ? {
-    executionProviders: ['dml', 'cuda', 'cpu'],
+    executionProviders: ['cpu'],
     executionMode: 'parallel',
   }
   : {

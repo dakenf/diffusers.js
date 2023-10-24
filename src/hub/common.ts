@@ -1,6 +1,7 @@
-// options compatible with @xenova/transformers
+import { ProgressCallback } from '@/pipelines/common'
+
 export interface GetModelFileOptions {
-  progress_callback?: (data: { status: string, file: string, progress: number }) => void
+  progressCallback?: ProgressCallback
   revision?: string
   returnText?: boolean
 }

@@ -1,6 +1,6 @@
 {
   "name": "@aislamov/diffusers.js",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "license": "MIT",
   "author": {
     "name": "Arthur Islamov",
@@ -29,7 +29,7 @@
     "test": "NODE_OPTIONS=--experimental-vm-modules npx jest",
     "lint": "eslint --ext .ts,.tsx src"
   },
-  "main": "dist/index.cjs",
+  "main": "dist/index.js",
   "exports": {
     ".": {
       "node": {
@@ -37,10 +37,13 @@
         "import": "./dist/index-node.esm.js"
       },
       "default": {
-        "require": "./dist/index.cjs",
+        "require": "./dist/index.js",
         "import": "./dist/index.esm.js"
       }
     }
+  },
+  "engines": {
+    "node": ">=18"
   },
   "browser": {
     "fs": false,

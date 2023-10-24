@@ -1,4 +1,5 @@
 import { IDBPDatabase, openDB } from 'idb'
+import { dispatchProgress, ProgressCallback, ProgressStatus } from '@/pipelines/common'
 
 interface FileMetadata {
   chunks: number;
@@ -48,7 +49,7 @@ export class DbCache {
     await transaction.done
   }
 
-  retrieveFile = async (filename: string): Promise<FileMetadata | null> => {
+  retrieveFile = async (filename: string, progressCallback: ProgressCallback, displayName: string): Promise<FileMetadata | null> => {
     const transaction = this.db.transaction(['files'], 'readonly')
     const store = transaction.objectStore('files')
     const request = await store.get(filename) as FileMetadata
@@ -73,10 +74,28 @@ export class DbCache {
     let view = new Uint8Array(buffer, 0, request.chunkLength)
     view.set(new Uint8Array(request.file))
 
+    await dispatchProgress(progressCallback, {
+      status: ProgressStatus.Downloading,
+      downloadStatus: {
+        file: displayName,
+        size: request.totalLength,
+        downloaded: request.chunkLength,
+      }
+    })
+
     for (let i = 1; i < request.chunks; i++) {
       const file = await store.get(`${filename}-${i}`) as FileMetadata
       view = new Uint8Array(buffer, i * baseChunkLength, file.file.byteLength)
       view.set(new Uint8Array(file.file as ArrayBuffer))
+
+      await dispatchProgress(progressCallback, {
+        status: ProgressStatus.Downloading,
+        downloadStatus: {
+          file: displayName,
+          size: request.totalLength,
+          downloaded: i * baseChunkLength + file.file.byteLength
+        }
+      })
     }
     await transaction.done
 
