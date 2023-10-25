@@ -1,5 +1,5 @@
 import minimist from 'minimist';
-import { StableDiffusionPipeline } from '@aislamov/diffusers.js'
+import { DiffusionPipeline } from '@aislamov/diffusers.js'
 import fs from 'fs'
 import { PNG } from 'pngjs'
 import progress from 'cli-progress'
@@ -19,7 +19,7 @@ function parseCommandLineArgs() {
 
 async function main() {
   const args = parseCommandLineArgs();
-  const pipe = await StableDiffusionPipeline.fromPretrained(
+  const pipe = await DiffusionPipeline.fromPretrained(
     args.m,
     {
       revision: args.rev,

@@ -12,12 +12,12 @@ npm i @aislamov/diffusers.js
 
 Browser (see examples/react)
 ```js
-const pipe = StableDiffusionPipeline.fromPretrained('aislamov/stable-diffusion-2-1-base-onnx')
+import { DiffusionPipeline } from '@aislamov/diffusers.js'
+
+const pipe = DiffusionPipeline.fromPretrained('aislamov/stable-diffusion-2-1-base-onnx')
 const images = pipe.run({
   prompt: "an astronaut running a horse",
   numInferenceSteps: 30,
-  width: 512,
-  height: 512,
 })
 
 const canvas = document.getElementById('canvas')
@@ -27,12 +27,13 @@ canvas.getContext('2d').putImageData(data, 0, 0);
 
 Node.js (see examples/node)
 ```js
-const pipe = StableDiffusionPipeline.fromPretrained('aislamov/stable-diffusion-2-1-base-onnx')
+import { DiffusionPipeline } from '@aislamov/diffusers.js'
+import { PNG } from 'pngjs'
+
+const pipe = DiffusionPipeline.fromPretrained('aislamov/stable-diffusion-2-1-base-onnx')
 const images = pipe.run({
   prompt: "an astronaut running a horse",
   numInferenceSteps: 30,
-  width: 512,
-  height: 512,
 })
 
 const data = await images[0].mul(255).round().clipByValue(0, 255).transpose(0, 2, 3, 1)
@@ -46,7 +47,7 @@ p.pack().pipe(fs.createWriteStream('output.png')).on('finish', () => {
 
 'aislamov/stable-diffusion-2-1-base-onnx' model is optimized for GPU and will fail to load without CUDA/DML/WebGPU support. Please use 'cpu' revision on a machine without GPU.
 ```js
-const pipe = StableDiffusionPipeline.fromPretrained('aislamov/stable-diffusion-2-1-base-onnx', 'cpu')
+const pipe = DiffusionPipeline.fromPretrained('aislamov/stable-diffusion-2-1-base-onnx', { revision: 'cpu' })
 ```
 
 ## Running examples

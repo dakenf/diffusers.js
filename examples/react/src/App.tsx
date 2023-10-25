@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import './App.css';
 import {
+  DiffusionPipeline,
   ProgressCallback,
   ProgressCallbackPayload,
   setModelCacheDir,
@@ -69,7 +70,7 @@ function App() {
     }
     setModelState('loading')
     try {
-      pipeline.current = await StableDiffusionPipeline.fromPretrained(
+      pipeline.current = await DiffusionPipeline.fromPretrained(
         'aislamov/stable-diffusion-2-1-base-onnx',
         {
           progressCallback
