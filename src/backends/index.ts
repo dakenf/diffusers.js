@@ -1,3 +1,4 @@
+// @ts-ignore
 import * as ORT from '@aislamov/onnxruntime-web64'
 import type { InferenceSession } from 'onnxruntime-common'
 import { replaceTensors } from '@/util/Tensor'
@@ -19,11 +20,20 @@ const onnxSessionOptions = isNode
 
 export class Session {
   private session: InferenceSession
-  constructor (session: InferenceSession) {
+  public config: Record<string, unknown>
+
+  constructor (session: InferenceSession, config: Record<string, unknown> = {}) {
     this.session = session
+    this.config = config || {}
   }
 
-  static async create (modelOrPath: string|ArrayBuffer, weightsPathOrBuffer?: string|ArrayBuffer, weightsFilename?: string, options?: InferenceSession.SessionOptions) {
+  static async create (
+    modelOrPath: string|ArrayBuffer,
+    weightsPathOrBuffer?: string|ArrayBuffer,
+    weightsFilename?: string,
+    config?: Record<string, unknown>,
+    options?: InferenceSession.SessionOptions,
+  ) {
     const arg = typeof modelOrPath === 'string' ? modelOrPath : new Uint8Array(modelOrPath)
 
     const sessionOptions = {
@@ -33,7 +43,7 @@ export class Session {
 
     const weightsParams = {
       externalWeights: weightsPathOrBuffer,
-      externalWeightsFilename: 'model.onnx_data',
+      externalWeightsFilename: weightsFilename,
     }
     const executionProviders = sessionOptions.executionProviders.map((provider) => {
       if (typeof provider === 'string') {
@@ -56,12 +66,16 @@ export class Session {
     })
 
     // @ts-ignore
-    return new Session(await session)
+    return new Session(await session, config)
   }
 
   async run (inputs: Record<string, Tensor>) {
     // @ts-ignore
     const result = await this.session.run(inputs)
     return replaceTensors(result)
+  }
+
+  release () {
+    return this.session.release()
   }
 }

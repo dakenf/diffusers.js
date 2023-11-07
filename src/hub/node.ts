@@ -43,26 +43,17 @@ async function writeResponseToFile (response: Response, displayName: string, out
     return `${(size / 1073741824).toFixed(2)} GB`
   }
 
-  // Function to handle reading chunks
-  async function handleChunk ({ done, value }: ReadableStreamReadResult<Uint8Array>) {
+  while (true) {
+    const { done, value } = await reader.read()
     if (done) {
-      writeStream.end()
-      progressBar.stop()
-      await fs.promises.rename(outputPath + '.tmp', outputPath)
-      return
+      break
     }
-
-    // Write the chunk to our WriteStream
-    writeStream.write(value!)
-
-    // Update the progress bar
+    writeStream.write(value)
     progressBar.increment(value!.length)
     progressBar.update({ size: formatSize(progressBar.value) })
-
-    return reader.read().then(handleChunk)
   }
-
-  return reader.read().then(handleChunk)
+  await new Promise(resolve => writeStream.end(resolve))
+  await fs.promises.rename(outputPath + '.tmp', outputPath)
 }
 
 export async function getModelFile (modelRepoOrPath: string, fileName: string, fatal = true, options: GetModelFileOptions = {}) {
@@ -77,27 +68,26 @@ export async function getModelFile (modelRepoOrPath: string, fileName: string, f
   }
 
   // download model to cache
-  const response = await downloadFile({ repo: modelRepoOrPath, path: fileName, revision })
-  if (!response) {
-    if (fatal) {
-      throw new Error(`Error downloading ${fileName}`)
+  try {
+    const response = await downloadFile({ repo: modelRepoOrPath, path: fileName, revision })
+    const targetPath = path.dirname(cachePath)
+    if (!await fileExists(targetPath)) {
+      await fs.promises.mkdir(targetPath, { recursive: true })
+    }
+    await writeResponseToFile(response, fileName, cachePath)
+
+    // await fs.writeFile(cachePath, response.body as unknown as Stream);
+    if (options.returnText) {
+      return fs.promises.readFile(cachePath, { encoding: 'utf-8' })
     }
 
-    return null
+    return cachePath
+  } catch (e) {
+    if (!fatal) {
+      return null
+    }
+    throw e
   }
-
-  const targetPath = path.dirname(cachePath)
-  if (!await fileExists(targetPath)) {
-    await fs.promises.mkdir(targetPath, { recursive: true })
-  }
-  await writeResponseToFile(response, fileName, cachePath)
-
-  // await fs.writeFile(cachePath, response.body as unknown as Stream);
-  if (options.returnText) {
-    return fs.promises.readFile(cachePath, { encoding: 'utf-8' })
-  }
-
-  return cachePath
 }
 
 export default {

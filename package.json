@@ -1,6 +1,6 @@
 {
   "name": "@aislamov/diffusers.js",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "license": "MIT",
   "author": {
     "name": "Arthur Islamov",
@@ -9,7 +9,7 @@
   },
   "type": "module",
   "dependencies": {
-    "@aislamov/onnxruntime-web64": "^1.0.3",
+    "@aislamov/onnxruntime-web64": "^1.0.6",
     "@huggingface/hub": "^0.8.5",
     "@types/node": "^16.18.34",
     "@xenova/transformers": "^2.6.2",
@@ -76,6 +76,6 @@
     }
   },
   "_moduleAliases": {
-    "@": "."
+    "@": "src"
   }
 }

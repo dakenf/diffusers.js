@@ -1,6 +1,9 @@
 import { InferenceSession } from 'onnxruntime-common'
 import { Tensor } from '@xenova/transformers'
 import { replaceTensors } from '@/util/Tensor'
+import { GetModelFileOptions } from '@/hub/common'
+import { getModelFile, getModelJSON } from '@/hub'
+import { Session } from '@/backends'
 
 export async function sessionRun (session: InferenceSession, inputs: Record<string, Tensor>) {
   // @ts-ignore
@@ -69,4 +72,24 @@ export function dispatchProgress (cb: ProgressCallback, payload: ProgressCallbac
   if (cb) {
     return cb(payload)
   }
+}
+
+export async function loadModel (
+  modelRepoOrPath: string,
+  filename: string,
+  opts: GetModelFileOptions,
+) {
+  const model = await getModelFile(modelRepoOrPath, filename, true, opts)
+  let weights = await getModelFile(modelRepoOrPath, filename + '_data', false, opts)
+  let weightsName = 'model.onnx_data'
+
+  const dirName = filename.split('/')[0]
+  if (!weights) {
+    weights = await getModelFile(modelRepoOrPath, dirName + '/weights.pb', false, opts)
+    weightsName = 'weights.pb'
+  }
+
+  const config = await getModelJSON(modelRepoOrPath, dirName + '/config.json', false, opts)
+
+  return Session.create(model, weights, weightsName, config)
 }

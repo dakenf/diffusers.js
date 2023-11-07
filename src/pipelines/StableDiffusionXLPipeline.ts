@@ -1,11 +1,13 @@
-import { PNDMScheduler, SchedulerConfig } from '@/schedulers/PNDMScheduler'
+import { PNDMScheduler, PNDMSchedulerConfig } from '@/schedulers/PNDMScheduler'
 import { CLIPTokenizer } from '../tokenizers/CLIPTokenizer'
 import { cat, randomNormalTensor } from '@/util/Tensor'
 import { Tensor } from '@xenova/transformers'
-import { dispatchProgress, PretrainedOptions, ProgressCallback, ProgressStatus, sessionRun } from './common'
+import { dispatchProgress, loadModel, PretrainedOptions, ProgressCallback, ProgressStatus, sessionRun } from './common'
 import { getModelFile, getModelJSON } from '../hub'
 import { Session } from '../backends'
 import { GetModelFileOptions } from '@/hub/common'
+import { SchedulerConfig } from '@/schedulers/SchedulerBase'
+import { PipelineBase } from '@/pipelines/PipelineBase'
 
 export interface StableDiffusionXLInput {
   prompt: string
@@ -23,25 +25,10 @@ export interface StableDiffusionXLInput {
   strength?: number
 }
 
-async function loadModel (
-  modelRepoOrPath: string,
-  filename: string,
-  opts: GetModelFileOptions,
-) {
-  const model = await getModelFile(modelRepoOrPath, filename, true, opts)
-  const weights = await getModelFile(modelRepoOrPath, filename + '_data', false, opts)
-
-  return Session.create(model, weights, 'model.onnx_data')
-}
-
-export class StableDiffusionXLPipeline {
-  public unet: Session
-  public vaeDecoder: Session
-  public textEncoder: Session
+export class StableDiffusionXLPipeline extends PipelineBase {
   public textEncoder2: Session
-  public tokenizer: CLIPTokenizer
   public tokenizer2: CLIPTokenizer
-  public scheduler: PNDMScheduler
+  declare scheduler: PNDMScheduler
 
   constructor (
     unet: Session,
@@ -52,6 +39,7 @@ export class StableDiffusionXLPipeline {
     tokenizer2: CLIPTokenizer,
     scheduler: PNDMScheduler,
   ) {
+    super()
     this.unet = unet
     this.vaeDecoder = vaeDecoder
     this.textEncoder = textEncoder
@@ -61,17 +49,13 @@ export class StableDiffusionXLPipeline {
     this.scheduler = scheduler
   }
 
-  static createScheduler (config: SchedulerConfig) {
+  static createScheduler (config: PNDMSchedulerConfig) {
     return new PNDMScheduler(
       {
         prediction_type: 'epsilon',
         ...config,
       },
     )
-  }
-
-  async sleep (ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms))
   }
 
   static async fromPretrained (modelRepoOrPath: string, options?: PretrainedOptions) {
@@ -84,14 +68,14 @@ export class StableDiffusionXLPipeline {
 
     const unet = await loadModel(
       modelRepoOrPath,
-      '/unet/model.onnx',
+      'unet/model.onnx',
       opts,
     )
-    const textEncoder2 = await loadModel(modelRepoOrPath, '/text_encoder_2/model.onnx', opts)
-    const textEncoder = await loadModel(modelRepoOrPath, '/text_encoder/model.onnx', opts)
-    const vae = await loadModel(modelRepoOrPath, '/vae_decoder/model.onnx', opts)
+    const textEncoder2 = await loadModel(modelRepoOrPath, 'text_encoder_2/model.onnx', opts)
+    const textEncoder = await loadModel(modelRepoOrPath, 'text_encoder/model.onnx', opts)
+    const vae = await loadModel(modelRepoOrPath, 'vae_decoder/model.onnx', opts)
 
-    const schedulerConfig = await getModelJSON(modelRepoOrPath, '/scheduler/scheduler_config.json', true, opts)
+    const schedulerConfig = await getModelJSON(modelRepoOrPath, 'scheduler/scheduler_config.json', true, opts)
     const scheduler = StableDiffusionXLPipeline.createScheduler(schedulerConfig)
 
     await dispatchProgress(opts.progressCallback, {
@@ -100,7 +84,7 @@ export class StableDiffusionXLPipeline {
     return new StableDiffusionXLPipeline(unet, vae, textEncoder, textEncoder2, tokenizer, tokenizer2, scheduler)
   }
 
-  async encodePrompt (prompt: string, tokenizer: CLIPTokenizer, textEncoder: Session) {
+  async encodePromptXl (prompt: string, tokenizer: CLIPTokenizer, textEncoder: Session) {
     const tokens = tokenizer(
       prompt,
       {
@@ -125,19 +109,19 @@ export class StableDiffusionXLPipeline {
     return { lastHiddenState, poolerOutput, hiddenStates }
   }
 
-  async getPromptEmbeds (prompt: string, negativePrompt: string|undefined) {
-    const promptEmbeds = await this.encodePrompt(prompt, this.tokenizer, this.textEncoder)
-    const negativePromptEmbeds = await this.encodePrompt(negativePrompt || '', this.tokenizer, this.textEncoder)
+  async getPromptEmbedsXl (prompt: string, negativePrompt: string|undefined) {
+    const promptEmbeds = await this.encodePromptXl(prompt, this.tokenizer, this.textEncoder)
+    const negativePromptEmbeds = await this.encodePromptXl(negativePrompt || '', this.tokenizer, this.textEncoder)
 
-    const promptEmbeds2 = await this.encodePrompt(prompt, this.tokenizer2, this.textEncoder2)
-    const negativePromptEmbeds2 = await this.encodePrompt(negativePrompt || '', this.tokenizer2, this.textEncoder2)
+    const promptEmbeds2 = await this.encodePromptXl(prompt, this.tokenizer2, this.textEncoder2)
+    const negativePromptEmbeds2 = await this.encodePromptXl(negativePrompt || '', this.tokenizer2, this.textEncoder2)
 
     return {
       hiddenStates: cat([
         cat([negativePromptEmbeds.hiddenStates, negativePromptEmbeds2.hiddenStates], -1),
         cat([promptEmbeds.hiddenStates, promptEmbeds2.hiddenStates], -1),
       ]),
-      textEmbeds: cat([negativePromptEmbeds2.lastHiddenState, promptEmbeds2.lastHiddenState]),
+      textEmbeds: cat([randomNormalTensor(negativePromptEmbeds2.lastHiddenState.dims), randomNormalTensor(promptEmbeds2.lastHiddenState.dims)]),
     }
   }
 
@@ -162,7 +146,7 @@ export class StableDiffusionXLPipeline {
       status: ProgressStatus.EncodingPrompt,
     })
 
-    const promptEmbeds = await this.getPromptEmbeds(input.prompt, input.negativePrompt)
+    const promptEmbeds = await this.getPromptEmbedsXl(input.prompt, input.negativePrompt)
 
     const latentShape = [batchSize, 4, width / 8, height / 8]
     let latents = randomNormalTensor(latentShape, undefined, undefined, 'float32', seed) // Normal latents used in Text-to-Image
@@ -185,6 +169,14 @@ export class StableDiffusionXLPipeline {
       })
       const latentInput = doClassifierFreeGuidance ? cat([latents, latents.clone()]) : latents
 
+      console.log('running', {
+        sample: latentInput,
+        timestep,
+        encoder_hidden_states: hiddenStates,
+        text_embeds: textEmbeds,
+        time_ids: timeIds,
+      })
+
       const noise = await this.unet.run(
         {
           sample: latentInput,
@@ -194,6 +186,8 @@ export class StableDiffusionXLPipeline {
           time_ids: timeIds,
         },
       )
+
+      console.log('noise', noise)
 
       let noisePred = noise.out_sample
       if (doClassifierFreeGuidance) {
@@ -239,5 +233,10 @@ export class StableDiffusionXLPipeline {
       .div(2)
       .add(0.5)
     return [images]
+  }
+
+  async release () {
+    await super.release()
+    return this.textEncoder2?.release()
   }
 }

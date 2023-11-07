@@ -194,6 +194,39 @@ Tensor.prototype.clipByValue_ = function (min: number, max: number) {
   return this
 }
 
+Tensor.prototype.exp = function () {
+  return this.clone().exp_()
+}
+
+Tensor.prototype.exp_ = function () {
+  for (let i = 0; i < this.data.length; ++i) {
+    this.data[i] = Math.exp(this.data[i])
+  }
+  return this
+}
+
+Tensor.prototype.sin = function () {
+  return this.clone().sin_()
+}
+
+Tensor.prototype.sin_ = function () {
+  for (let i = 0; i < this.data.length; ++i) {
+    this.data[i] = Math.sin(this.data[i])
+  }
+  return this
+}
+
+Tensor.prototype.cos = function () {
+  return this.clone().cos_()
+}
+
+Tensor.prototype.cos_ = function () {
+  for (let i = 0; i < this.data.length; ++i) {
+    this.data[i] = Math.cos(this.data[i])
+  }
+  return this
+}
+
 Tensor.prototype.location = 'cpu'
 
 export function range (start: number, end: number, step = 1, type = 'float32') {
@@ -222,7 +255,11 @@ function randomNormal (rng: seedrandom.PRNG) {
   return num
 }
 
-export function randomNormalTensor (shape: number[], mean = 0, std = 1, type = 'float32', seed: string) {
+export function scalarTensor (num: number, type = 'float32') {
+  return new Tensor(type, new Float32Array([num]), [1])
+}
+
+export function randomNormalTensor (shape: number[], mean = 0, std = 1, type = 'float32', seed: string = '') {
   const data = []
   const rng = seed !== '' ? seedrandom(seed) : seedrandom()
   for (let i = 0; i < shape.reduce((a, b) => a * b); i++) {

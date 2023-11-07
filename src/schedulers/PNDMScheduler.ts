@@ -1,58 +1,34 @@
 import { cat, linspace, range } from '@/util/Tensor'
 import { Tensor } from '@xenova/transformers'
+import { betasForAlphaBar } from '@/schedulers/common'
+import { SchedulerBase, SchedulerConfig } from '@/schedulers/SchedulerBase'
 
-export interface SchedulerConfig {
-  'beta_end': number,
-  'beta_schedule': string,
-  'beta_start': number,
-  'clip_sample': boolean,
-  'num_train_timesteps': number,
-  prediction_type?: 'epsilon'|'v_prediction',
-  'set_alpha_to_one': boolean,
-  'skip_prk_steps': boolean,
-  'steps_offset': number,
-  'trained_betas': null
+export interface PNDMSchedulerConfig extends SchedulerConfig {
+  skip_prk_steps: boolean,
 }
 
 /**
  * Pseudo numerical methods for diffusion models (PNDM) proposes using more advanced ODE integration techniques,
  * namely Runge-Kutta method and a linear multistep method.
  */
-export class PNDMScheduler {
-  betas: Tensor
-  alphas: Tensor
-  alphasCumprod!: Tensor
-  finalAlphaCumprod!: number
+export class PNDMScheduler extends SchedulerBase {
+  declare config: PNDMSchedulerConfig
   initNoiseSigma: number
   pndmOrder: number
   curModelOutput: Tensor|number
   counter: number
   curSample: Tensor|null
   ets: Tensor[]
-  numInferenceSteps: number = 20
-  timesteps: Tensor
   prkTimesteps: Tensor|null
   plmsTimesteps: Tensor|null
-  config: SchedulerConfig // Define your config type
 
   constructor (
-    config: SchedulerConfig,
+    config: PNDMSchedulerConfig,
   ) {
-    this.config = config
-
-    if (config.trained_betas !== null) {
-      this.betas = linspace(config.beta_start, config.beta_end, config.num_train_timesteps)
-    } else if (config.beta_schedule === 'linear') {
-      this.betas = linspace(config.beta_start, config.beta_end, config.num_train_timesteps)
-    } else if (config.beta_schedule === 'scaled_linear') {
-      this.betas = linspace(config.beta_start ** 0.5, config.beta_end ** 0.5, config.num_train_timesteps).pow(2)
-    } else if (config.beta_schedule === 'squaredcos_cap_v2') {
-      this.betas = betasForAlphaBar(config.num_train_timesteps)
-    } else {
-      throw new Error(`${config.beta_schedule} does is not implemented for ${this.constructor}`)
+    if (typeof config.skip_prk_steps === 'undefined') {
+      config.skip_prk_steps = true
     }
-
-    this.alphas = linspace(1, 1, config.num_train_timesteps).sub(this.betas)
+    super(config)
 
     this.initNoiseSigma = 1.0
     this.pndmOrder = 4
@@ -63,13 +39,8 @@ export class PNDMScheduler {
     this.curSample = null
     this.ets = []
 
-    // setable values
-    this.timesteps = range(0, config.num_train_timesteps).reverse()
     this.prkTimesteps = null
     this.plmsTimesteps = null
-
-    this.alphasCumprod = this.alphas.cumprod()
-    this.finalAlphaCumprod = config.set_alpha_to_one ? 1.0 : this.alphasCumprod[0].data
   }
 
   setTimesteps (numInferenceSteps: number) {
@@ -227,27 +198,4 @@ export class PNDMScheduler {
 
     return prevSample
   }
-
-  // Taken from https://github.com/huggingface/diffusers/blob/d1e20be664dd8774e49d1a9d54fd71ec7cd5863c/src/diffusers/schedulers/scheduling_pndm.py#L453
-  add_noise (original_samples: Tensor, noise: Tensor, timestep: number) {
-    const sqrt_alpha_prod = this.alphasCumprod.data[timestep] ** 0.5
-    const sqrt_one_minus_alpha_prod = (1 - this.alphasCumprod.data[timestep]) ** 0.5
-
-    const noisy_samples = original_samples.mul(sqrt_alpha_prod).add(noise.mul(sqrt_one_minus_alpha_prod))
-    return noisy_samples
-  }
-}
-
-function betasForAlphaBar (numDiffusionTimesteps: number, maxBeta = 0.999) {
-  function alphaBar (timeStep: number) {
-    return Math.cos((timeStep + 0.008) / 1.008 * Math.PI / 2) ** 2
-  }
-
-  const betas = []
-  for (let i = 0; i < numDiffusionTimesteps; i++) {
-    const t1 = i / numDiffusionTimesteps
-    const t2 = (i + 1) / numDiffusionTimesteps
-    betas.push(Math.min(1 - alphaBar(t2) / alphaBar(t1), maxBeta))
-  }
-  return new Tensor(betas)
 }

@@ -1,7 +1,17 @@
 import React, { useEffect, useState } from 'react'
-import { memory64 } from 'wasm-feature-detect'
+import { memory64, jspi } from 'wasm-feature-detect'
 import Stack from '@mui/material/Stack'
 import Alert from '@mui/material/Alert'
+
+export async function hasFp16 () {
+  try {
+    // @ts-ignore
+    const adapter = await navigator.gpu.requestAdapter()
+    return adapter.features.has('shader-f16')
+  } catch (e) {
+    return false
+  }
+}
 
 export const BrowserFeatures = () => {
   const [hasMemory64, setHasMemory64] = useState(false);
@@ -13,7 +23,7 @@ export const BrowserFeatures = () => {
   useEffect(() => {
     memory64().then(value => setHasMemory64(value))
     // @ts-ignore
-    setHasJspi(typeof WebAssembly.Function !== 'undefined')
+    jspi().then(value => setHasJspi(value))
 
     try {
       // @ts-ignore
@@ -24,15 +34,10 @@ export const BrowserFeatures = () => {
       //
     }
 
-    try {
-      // @ts-ignore
-      navigator.gpu.requestAdapter().then((adapter) => {
-        setHasF16(adapter.features.has('shader-f16'))
-      })
+    hasFp16().then(v => {
+      setHasF16(v)
       setHasGpu(true)
-    } catch (e) {
-      //
-    }
+    })
 
   }, [])
 
@@ -41,7 +46,7 @@ export const BrowserFeatures = () => {
       {!hasMemory64 && <Alert severity="error">You need latest Chrome with "Experimental WebAssembly" flag enabled!</Alert>}
       {!hasJspi && <Alert severity="error">You need "Experimental WebAssembly JavaScript Promise Integration (JSPI)" flag enabled!</Alert>}
       {!hasSharedMemory64 && <Alert severity="error">You need Chrome Canary 119 or newer!</Alert>}
-      {!hasF16 && <Alert severity="error">You need to run chrome with --enable-dawn-features=allow_unsafe_apis on linux/mac or with --enable-dawn-features=allow_unsafe_apis,use_dxc on windows!</Alert>}
+      {!hasF16 && <Alert severity="error">You need Chrome Canary 121 or higher for FP16 support!</Alert>}
       {!hasGpu && <Alert severity="error">You need a browser with WebGPU support!</Alert>}
     </Stack>
   )

@@ -17,9 +17,9 @@ import Grid from '@mui/material/Grid';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
-import { Checkbox } from '@mui/material';
+import { Checkbox, FormControl, InputLabel, MenuItem, Select } from '@mui/material'
 import { FormControlLabel } from '@mui/material';
-import { BrowserFeatures } from './components/BrowserFeatures'
+import { BrowserFeatures, hasFp16 } from './components/BrowserFeatures'
 import { FAQ } from './components/FAQ'
 import { Tensor } from '@xenova/transformers'
 
@@ -29,12 +29,64 @@ const darkTheme = createTheme({
   },
 });
 
+interface SelectedPipeline {
+  name: string
+  repo: string
+  revision: string
+  fp16: boolean
+  steps: number
+  hasImg2Img: boolean
+}
+
+const pipelines = [
+  {
+    name: 'LCM Dreamshaper FP16 (2.2GB)',
+    repo: 'aislamov/lcm-dreamshaper-v7-onnx',
+    revision: 'main',
+    fp16: true,
+    width: 768,
+    height: 768,
+    steps: 8,
+    hasImg2Img: false,
+  },
+  // {
+  //   name: 'LCM Dreamshaper FP32 (4.2GB)',
+  //   repo: 'aislamov/lcm-dreamshaper-v7-onnx',
+  //   revision: 'fp32',
+  //   fp16: false,
+  //   width: 768,
+  //   height: 768,
+  //   steps: 8,
+  // },
+  {
+    name: 'StableDiffusion 2.1 Base FP16 (2.6GB)',
+    repo: 'aislamov/stable-diffusion-2-1-base-onnx',
+    revision: 'main',
+    fp16: true,
+    width: 512,
+    height: 512,
+    steps: 20,
+    hasImg2Img: true,
+  },
+  // {
+  //   name: 'StableDiffusion 2.1 Base FP32 (5.1GB)',
+  //   repo: 'aislamov/stable-diffusion-2-1-base-onnx',
+  //   revision: 'fp32',
+  //   fp16: false,
+  //   width: 512,
+  //   height: 512,
+  //   steps: 20,
+  // },
+]
+
 function App() {
+  const [hasF16, setHasF16] = useState<boolean>(false);
+  const [selectedPipeline, setSelectedPipeline] = useState<SelectedPipeline|undefined>(pipelines[0]);
   const [modelState, setModelState] = useState<'none'|'loading'|'ready'|'inferencing'>('none');
-  const [prompt, setPrompt] = useState('An astronaut riding a green horse');
+  const [prompt, setPrompt] = useState('An astronaut riding a horse');
   const [negativePrompt, setNegativePrompt] = useState('');
-  const [inferenceSteps, setInferenceSteps] = useState(3);
-  const [guidanceScale, setGuidanceScale] = useState(5);
+  const [inferenceSteps, setInferenceSteps] = useState(20);
+  const [guidanceScale, setGuidanceScale] = useState(7.5);
   const [seed, setSeed] = useState('');
   const [status, setStatus] = useState('Ready');
   const pipeline = useRef<StableDiffusionXLPipeline|StableDiffusionPipeline|null>(null);
@@ -44,7 +96,17 @@ function App() {
   const [runVaeOnEachStep, setRunVaeOnEachStep] = useState(false);
   useEffect(() => {
     setModelCacheDir('models')
+    hasFp16().then(v => {
+      setHasF16(v)
+      if (v === false) {
+        setSelectedPipeline(pipelines.find(p => p.fp16 === false))
+      }
+    })
   }, [])
+
+  useEffect(() => {
+    setInferenceSteps(selectedPipeline?.steps || 20)
+  }, [selectedPipeline])
 
   const drawImage = async (image: Tensor) => {
     const canvas = document.getElementById('canvas') as HTMLCanvasElement
@@ -65,14 +127,19 @@ function App() {
   }
 
   const loadModel = async () => {
-    if (!window.confirm('This will download approximately 2.5gb, use about 5gb of your RAM and up to 12gb VRAM. Are you sure want to continue?')) {
+    if (!selectedPipeline) {
       return
     }
     setModelState('loading')
     try {
+      if (pipeline.current) {
+        // @ts-ignore
+        pipeline.current.release()
+      }
       pipeline.current = await DiffusionPipeline.fromPretrained(
-        'aislamov/stable-diffusion-2-1-base-onnx',
+        selectedPipeline.repo,
         {
+          revision: selectedPipeline?.revision,
           progressCallback
         }
       )
@@ -156,6 +223,9 @@ function App() {
       <CssBaseline enableColorScheme={true} />
       <Container>
         <BrowserFeatures />
+        <Stack alignItems={'center'}>
+          <p>Built with <a href={"https://github.com/dakenf/diffusers.js"} target={"_blank"}>diffusers.js</a></p>
+        </Stack>
         <Box sx={{ bgcolor: '#282c34' }} pt={4} pl={3} pr={3} pb={4}>
           <Grid container spacing={2}>
             <Grid item xs={6}>
@@ -198,31 +268,36 @@ function App() {
                   onChange={(e) => setSeed(e.target.value)}
                   value={seed}
                 />
-                <FormControlLabel
-                  label="Check if you want to use the Img2Img pipeline"
-                  control={<Checkbox
-                    disabled={modelState != 'ready'}
-                    onChange={(e) => setImg2Img(e.target.checked)}
-                    checked={img2img}
-                  />}
-                />
-                <label htmlFor="upload_image">Upload Image for Img2Img Pipeline:</label>
-                <TextField
-                  id="upload_image"
-                  inputProps={{accept:"image/*"}}
-                  type={"file"}
-                  disabled={!img2img}
-                  onChange={(e) => uploadImage(e)}
-                />
-                <TextField
-                  label="Strength (Noise to add to input image). Value ranges from 0 to 1"
-                  variant="standard"
-                  type='number'
-                  InputProps={{ inputProps: { min: 0, max: 1, step: 0.1 } }}
-                  disabled={!img2img}
-                  onChange={(e) => setStrength(parseFloat(e.target.value))}
-                  value={strength}
-                />
+                {selectedPipeline?.hasImg2Img &&
+                  (
+                    <>
+                      <FormControlLabel
+                        label="Check if you want to use the Img2Img pipeline"
+                        control={<Checkbox
+                          disabled={modelState != 'ready'}
+                          onChange={(e) => setImg2Img(e.target.checked)}
+                          checked={img2img}
+                        />}
+                      />
+                      <label htmlFor="upload_image">Upload Image for Img2Img Pipeline:</label>
+                      <TextField
+                        id="upload_image"
+                        inputProps={{accept:"image/*"}}
+                        type={"file"}
+                        disabled={!img2img}
+                        onChange={(e) => uploadImage(e)}
+                      />
+                      <TextField
+                        label="Strength (Noise to add to input image). Value ranges from 0 to 1"
+                        variant="standard"
+                        type='number'
+                        InputProps={{ inputProps: { min: 0, max: 1, step: 0.1 } }}
+                        disabled={!img2img}
+                        onChange={(e) => setStrength(parseFloat(e.target.value))}
+                        value={strength}
+                      />
+                    </>
+                )}
                 <FormControlLabel
                   label="Check if you want to run VAE after each step"
                   control={<Checkbox
@@ -231,7 +306,18 @@ function App() {
                     checked={runVaeOnEachStep}
                   />}
                 />
-                <p>Press the button below to download StableDiffusion 2.1 base. It will be stored in your browser cache.</p>
+                <FormControl fullWidth>
+                  <InputLabel id="demo-simple-select-label">Pipeline</InputLabel>
+                    <Select
+                      value={selectedPipeline?.name}
+                      onChange={e => {
+                        setSelectedPipeline(pipelines.find(p => e.target.value === p.name))
+                        setModelState('none')
+                      }}>
+                      {pipelines.map(p => <MenuItem value={p.name} disabled={!hasF16 && p.fp16}>{p.name}</MenuItem>)}
+                    </Select>
+                </FormControl>
+                <p>Press the button below to download model. It will be stored in your browser cache.</p>
                 <p>All settings above will become editable once model is downloaded.</p>
                 <Button variant="outlined" onClick={loadModel} disabled={modelState != 'none'}>Load model</Button>
                 <Button variant="outlined" onClick={runInference} disabled={modelState != 'ready'}>Run</Button>

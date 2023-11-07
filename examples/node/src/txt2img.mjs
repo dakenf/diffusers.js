@@ -36,8 +36,8 @@ async function main() {
     negativePrompt: args.negativePrompt,
     numInferenceSteps: args.steps,
     sdV1: args.version === 1,
-    height: 512,
-    width: 512,
+    height: 768,
+    width: 768,
     guidanceScale: 7.5,
     img2imgFlag: false,
     progressCallback: (progress) => {
@@ -47,7 +47,7 @@ async function main() {
   progressBar.stop()
   const data = await images[0].mul(255).round().clipByValue(0, 255).transpose(0, 2, 3, 1)
 
-  const p = new PNG({ width: 512, height: 512, inputColorType: 2 })
+  const p = new PNG({ width: 768, height: 768, inputColorType: 2 })
   p.data = Buffer.from(data.data)
   p.pack().pipe(fs.createWriteStream('output.png')).on('finish', () => {
     console.log('Image saved as output.png');

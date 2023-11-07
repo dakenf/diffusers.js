@@ -16,4 +16,8 @@ module.exports = {
       },
     ],
   },
+  setupFilesAfterEnv: ['<rootDir>/src/tests/bootstrap.js'],
+  "moduleNameMapper": {
+    "@/(.*)": "<rootDir>/src/$1",
+  },
 }

@@ -3,6 +3,7 @@ import { GetModelFileOptions } from '@/hub/common'
 import { getModelJSON } from '@/hub'
 import { StableDiffusionPipeline } from '@/pipelines/StableDiffusionPipeline'
 import { StableDiffusionXLPipeline } from '@/pipelines/StableDiffusionXLPipeline'
+import { LatentConsistencyModelPipeline } from '@/pipelines/LatentConsistencyModelPipeline'
 
 export class DiffusionPipeline {
   static async fromPretrained (modelRepoOrPath: string, options?: PretrainedOptions) {
@@ -17,7 +18,10 @@ export class DiffusionPipeline {
       case 'OnnxStableDiffusionPipeline':
         return StableDiffusionPipeline.fromPretrained(modelRepoOrPath, options)
       case 'StableDiffusionXLPipeline':
+      case 'ORTStableDiffusionXLPipeline':
         return StableDiffusionXLPipeline.fromPretrained(modelRepoOrPath, options)
+      case 'LatentConsistencyModelPipeline':
+        return LatentConsistencyModelPipeline.fromPretrained(modelRepoOrPath, options)
       default:
         throw new Error(`Unknown pipeline type ${index['_class_name']}`)
     }
