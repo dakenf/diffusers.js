@@ -2,6 +2,7 @@ import { PretrainedOptions } from '@/pipelines/common'
 import { GetModelFileOptions } from '@/hub/common'
 import { getModelJSON } from '@/hub'
 import { StableDiffusionPipeline } from '@/pipelines/StableDiffusionPipeline'
+import { StableDiffusionControlNetPipeline } from './StableDiffusionControlNetPipeline'
 import { StableDiffusionXLPipeline } from '@/pipelines/StableDiffusionXLPipeline'
 import { LatentConsistencyModelPipeline } from '@/pipelines/LatentConsistencyModelPipeline'
 
@@ -16,7 +17,12 @@ export class DiffusionPipeline {
     switch (index['_class_name']) {
       case 'StableDiffusionPipeline':
       case 'OnnxStableDiffusionPipeline':
-        return StableDiffusionPipeline.fromPretrained(modelRepoOrPath, options)
+        if (typeof index['controlnet'] === 'undefined') {
+          return StableDiffusionPipeline.fromPretrained(modelRepoOrPath, options)
+        }
+        else {
+          return StableDiffusionControlNetPipeline.fromPretrained(modelRepoOrPath, options) 
+        }
       case 'StableDiffusionXLPipeline':
       case 'ORTStableDiffusionXLPipeline':
         return StableDiffusionXLPipeline.fromPretrained(modelRepoOrPath, options)

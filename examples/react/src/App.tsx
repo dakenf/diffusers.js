@@ -22,6 +22,8 @@ import { FormControlLabel } from '@mui/material';
 import { BrowserFeatures, hasFp16 } from './components/BrowserFeatures'
 import { FAQ } from './components/FAQ'
 import { Tensor } from '@xenova/transformers'
+import cv from '@techstark/opencv-js'
+import { StableDiffusionControlNetPipeline } from '../../../dist/pipelines/StableDiffusionControlNetPipeline';
 
 const darkTheme = createTheme({
   palette: {
@@ -36,6 +38,7 @@ interface SelectedPipeline {
   fp16: boolean
   steps: number
   hasImg2Img: boolean
+  hasControlNet: boolean
 }
 
 const pipelines = [
@@ -48,6 +51,7 @@ const pipelines = [
     height: 768,
     steps: 8,
     hasImg2Img: false,
+    hasControlNet: false
   },
   // {
   //   name: 'LCM Dreamshaper FP32 (4.2GB)',
@@ -67,6 +71,7 @@ const pipelines = [
     height: 512,
     steps: 20,
     hasImg2Img: true,
+    hasControlNet: false
   },
   // {
   //   name: 'StableDiffusion 2.1 Base FP32 (5.1GB)',
@@ -77,6 +82,17 @@ const pipelines = [
   //   height: 512,
   //   steps: 20,
   // },
+  {
+    name: 'StableDiffusion 1.5 Base FP16 Canny (2.9GB)',
+    repo: 'jdp8/stable-diffusion-1-5-canny-base-onnx',
+    revision: 'main',
+    fp16: true,
+    width: 512,
+    height: 512,
+    steps: 20,
+    hasImg2Img: true,
+    hasControlNet: true
+  },
 ]
 
 function App() {
@@ -89,10 +105,11 @@ function App() {
   const [guidanceScale, setGuidanceScale] = useState(7.5);
   const [seed, setSeed] = useState('');
   const [status, setStatus] = useState('Ready');
-  const pipeline = useRef<StableDiffusionXLPipeline|StableDiffusionPipeline|null>(null);
+  const pipeline = useRef<StableDiffusionXLPipeline|StableDiffusionPipeline|StableDiffusionControlNetPipeline|null>(null);
   const [img2img, setImg2Img] = useState(false);
   const [inputImage, setInputImage] = useState<Float32Array>();
   const [strength, setStrength] = useState(0.8);
+  const [controlNetImage, setControlNetImage] = useState<Float32Array>();
   const [runVaeOnEachStep, setRunVaeOnEachStep] = useState(false);
   useEffect(() => {
     setModelCacheDir('models')
@@ -122,6 +139,7 @@ function App() {
     }
 
     if (info.images) {
+      // @ts-ignore
       await drawImage(info.images[0])
     }
   }
@@ -150,7 +168,14 @@ function App() {
     }
   }
 
-  function getRgbData(d: Uint8ClampedArray) {
+  /**
+   * Extracts the RGB data from an RGBA image array.
+   * 
+   * @param d RGBA image array.
+   * @param normalize Normalizes the image array to [-1,1] if true. Set to true for img2img and false for controlnet.
+   * @returns RGB Float32Array.
+   */
+  function getRgbData(d: Uint8ClampedArray, normalize=true) {
     let rgbData: any = [[], [], []]; // [r, g, b]
     // remove alpha and put into correct shape:
     for(let i = 0; i < d.length; i += 4) {
@@ -159,15 +184,24 @@ function App() {
         if(!rgbData[0][y]) rgbData[0][y] = [];
         if(!rgbData[1][y]) rgbData[1][y] = [];
         if(!rgbData[2][y]) rgbData[2][y] = [];
-        rgbData[0][y][x] = (d[i+0]/255) * 2 - 1;
-        rgbData[1][y][x] = (d[i+1]/255) * 2 - 1;
-        rgbData[2][y][x] = (d[i+2]/255) * 2 - 1;
+        rgbData[0][y][x] = normalize ? (d[i+0]/255) * 2 - 1 : (d[i+0]/255);
+        rgbData[1][y][x] = normalize ? (d[i+1]/255) * 2 - 1 : (d[i+1]/255);
+        rgbData[2][y][x] = normalize ? (d[i+2]/255) * 2 - 1 : (d[i+2]/255);
     }
     rgbData = Float32Array.from(rgbData.flat().flat());
     return rgbData;
   }
 
-  function uploadImage(e: any) {
+  /**
+   * Takes an input image and saves it to the corresponding state variable. 
+   * The input image can be used either for the controlnet or img2img pipelines
+   * which is determined by type.
+   * 
+   * @param e HTML file upload element.
+   * @param type Pipeline of the input image.
+   * @returns void
+   */
+  function uploadImage(e: any, type: 'controlnet'|'img2img') {
     if(!e.target.files[0]) {
       // No image uploaded
       return;
@@ -179,15 +213,42 @@ function App() {
     reader.addEventListener('loadend', function(file: any) {
       // On image load
       uploadedImage.addEventListener('load', function() {
-        const imageCanvas = document.createElement('canvas');
-        imageCanvas.width = uploadedImage.width;
-        imageCanvas.height = uploadedImage.height;
-        const imgCtx = imageCanvas.getContext('2d') as CanvasRenderingContext2D;
-        imgCtx.drawImage(uploadedImage, 0, 0, uploadedImage.width, uploadedImage.height);
-        const imageData = imgCtx.getImageData(0, 0, uploadedImage.width, uploadedImage.height).data;
+        if (type == 'img2img') {
+          const imageCanvas = document.createElement('canvas');
+          imageCanvas.width = uploadedImage.width;
+          imageCanvas.height = uploadedImage.height;
+          const imgCtx = imageCanvas.getContext('2d') as CanvasRenderingContext2D;
+          imgCtx.drawImage(uploadedImage, 0, 0, uploadedImage.width, uploadedImage.height);
+          const imageData = imgCtx.getImageData(0, 0, uploadedImage.width, uploadedImage.height).data;
 
-        const rgb_array = getRgbData(imageData);
-        setInputImage(rgb_array);
+          const rgb_array = getRgbData(imageData);
+          setInputImage(rgb_array);
+        }
+        else if(type == 'controlnet') {
+          // For now only Canny Edge Detection is available
+          const cvImg = cv.imread(uploadedImage); // RGBA Image | 4 Channels
+          const imgGray = new cv.Mat();
+          cv.cvtColor(cvImg, imgGray, cv.COLOR_RGBA2GRAY); // Gray Image | 1 Channel
+          const imgCanny = new cv.Mat();
+          cv.Canny(imgGray, imgCanny, 100, 200, 3, false); // Canny Image | 1 Channel
+          const rgbaCanny = new cv.Mat();
+          cv.cvtColor(imgCanny, rgbaCanny, cv.COLOR_GRAY2RGBA, 0); // RGBA Canny Image | 4 Channels
+
+          /**
+           * The canny data can be accessed as so:
+           * cannyEdges.data -> UInt8Array
+           * cannyEdges.data8S -> Int8Array
+           * cannyEdges.data16S -> Int16Array
+           * cannyEdges.data16U -> UInt16Array
+           * cannyEdges.data32F -> Float32Array
+           * cannyEdges.data32S -> Int32Array
+           * cannyEdges.data64F -> Float64Array
+           */
+
+          const rgbCanny = getRgbData(Uint8ClampedArray.from(rgbaCanny.data), false);
+          setControlNetImage(rgbCanny);
+          cvImg.delete();imgGray.delete();imgCanny.delete();rgbaCanny.delete();
+        }
       });
       uploadedImage.src = file.target.result;
     });
@@ -212,7 +273,8 @@ function App() {
       progressCallback,
       img2imgFlag: img2img,
       inputImage: inputImage,
-      strength: strength
+      strength: strength,
+      controlNetImage: controlNetImage
     })
     await drawImage(images[0])
     setModelState('ready')
@@ -268,6 +330,19 @@ function App() {
                   onChange={(e) => setSeed(e.target.value)}
                   value={seed}
                 />
+                {selectedPipeline?.hasControlNet &&
+                  (
+                    <>
+                      <label htmlFor="upload_controlnet_image">Upload Image for ControlNet Pipeline:</label>
+                      <TextField
+                        id="upload_controlnet_image"
+                        inputProps={{accept:"image/*"}}
+                        type={"file"}
+                        disabled={modelState != 'ready'}
+                        onChange={(e) => uploadImage(e, "controlnet")}
+                      />
+                  </>
+                )}
                 {selectedPipeline?.hasImg2Img &&
                   (
                     <>
@@ -285,7 +360,7 @@ function App() {
                         inputProps={{accept:"image/*"}}
                         type={"file"}
                         disabled={!img2img}
-                        onChange={(e) => uploadImage(e)}
+                        onChange={(e) => uploadImage(e, 'img2img')}
                       />
                       <TextField
                         label="Strength (Noise to add to input image). Value ranges from 0 to 1"
