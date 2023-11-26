@@ -129,7 +129,6 @@ export class LatentConsistencyModelPipeline extends PipelineBase {
       [latents, denoised] = this.scheduler.step(
         noise.out_sample,
         step,
-        humanStep - 1,
         latents,
       )
 

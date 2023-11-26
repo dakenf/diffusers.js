@@ -2,7 +2,7 @@
   "name": "@aislamov/diffusers.js-resource-example",
   "version": "1.0",
   "private": true,
-  "homepage": "https://islamov.ai/diffusers.js",
+  "homepage": ".",
   "dependencies": {
     "@aislamov/diffusers.js": "file:../..",
     "@emotion/react": "^11.11.1",

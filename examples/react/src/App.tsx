@@ -39,16 +39,18 @@ interface SelectedPipeline {
   steps: number
   hasImg2Img: boolean
   hasControlNet: boolean
+  width: number
+  height: number
 }
 
 const pipelines = [
   {
     name: 'LCM Dreamshaper FP16 (2.2GB)',
-    repo: 'aislamov/lcm-dreamshaper-v7-onnx',
+    repo: 'aislamov/lcm-dreamshaper-fp16',
     revision: 'main',
     fp16: true,
-    width: 768,
-    height: 768,
+    width: 512,
+    height: 512,
     steps: 8,
     hasImg2Img: false,
     hasControlNet: false
@@ -92,6 +94,17 @@ const pipelines = [
     steps: 20,
     hasImg2Img: true,
     hasControlNet: true
+  },
+  {
+    name: 'SSD-1B LCM (4.5GB)',
+    repo: 'aislamov/ssd-1b-fp16',
+    revision: 'main',
+    fp16: true,
+    width: 1024,
+    height: 1024,
+    steps: 8,
+    hasImg2Img: false,
+    hasControlNet: false,
   },
 ]
 
@@ -267,8 +280,8 @@ function App() {
       numInferenceSteps: inferenceSteps,
       guidanceScale: guidanceScale,
       seed: seed,
-      width: 512,
-      height: 512,
+      width: selectedPipeline?.width,
+      height: selectedPipeline?.height,
       runVaeOnEachStep,
       progressCallback,
       img2imgFlag: img2img,
@@ -402,7 +415,7 @@ function App() {
 
             </Grid>
             <Grid item xs={6}>
-              <canvas id={'canvas'} width={512} height={512} style={{ border: '1px dashed #ccc'}} />
+              <canvas id={'canvas'} width={selectedPipeline?.width} height={selectedPipeline?.height} style={{ border: '1px dashed #ccc'}} />
             </Grid>
           </Grid>
         </Box>

@@ -11,6 +11,7 @@ export interface LCMSchedulerConfig extends SchedulerConfig {
 export class LCMScheduler extends SchedulerBase {
   initNoiseSigma: number
   declare config: LCMSchedulerConfig
+  timeIndex: number
 
   constructor (config: LCMSchedulerConfig) {
     super({
@@ -23,6 +24,7 @@ export class LCMScheduler extends SchedulerBase {
       steps_offset: 0,
       prediction_type: 'epsilon',
       thresholding: false,
+      original_inference_steps: 50,
       ...config,
     })
 
@@ -50,14 +52,13 @@ export class LCMScheduler extends SchedulerBase {
   step (
     modelOutput: Tensor,
     timestep: number,
-    timeIndex: number,
     sample: Tensor,
   ): Tensor[] {
     if (!this.numInferenceSteps) {
       throw new Error('numInferenceSteps is not set')
     }
 
-    const prevTimeIndex = timeIndex + 1
+    const prevTimeIndex = this.timeIndex + 1
     let prevTimeStep
     if (prevTimeIndex < this.timesteps.data.length) {
       prevTimeStep = this.timesteps.data[prevTimeIndex]
@@ -92,6 +93,8 @@ export class LCMScheduler extends SchedulerBase {
       prevSample = denoised.mul(Math.sqrt(alphaProdTPrev)).add(noise.mul(Math.sqrt(betaProdTPrev)))
     }
 
+    this.timeIndex++
+
     return [
       prevSample,
       denoised,
@@ -120,6 +123,8 @@ export class LCMScheduler extends SchedulerBase {
         break
       }
     }
+
+    this.timeIndex = 0
 
     this.timesteps = new Tensor(
       new Int32Array(

@@ -76,6 +76,7 @@ export class Session {
   }
 
   release () {
+    // @ts-ignore
     return this.session.release()
   }
 }
