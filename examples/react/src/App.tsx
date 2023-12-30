@@ -24,6 +24,7 @@ import { FAQ } from './components/FAQ'
 import { Tensor } from '@xenova/transformers'
 import cv from '@techstark/opencv-js'
 import { StableDiffusionControlNetPipeline } from '../../../dist/pipelines/StableDiffusionControlNetPipeline';
+import { getBlobFromImage, generateColors, segArgmax, posePostProcess, loadAnnotatorFile } from './annotator_helper_functions' 
 
 const darkTheme = createTheme({
   palette: {
@@ -39,6 +40,7 @@ interface SelectedPipeline {
   steps: number
   hasImg2Img: boolean
   hasControlNet: boolean
+  controlnet?: string
 }
 
 const pipelines = [
@@ -91,7 +93,32 @@ const pipelines = [
     height: 512,
     steps: 20,
     hasImg2Img: true,
-    hasControlNet: true
+    hasControlNet: true,
+    controlnet: 'canny'
+  },
+  {
+    name: 'StableDiffusion 1.5 Base FP16 Semantic Segmentation (2.9GB)',
+    repo: 'jdp8/stable-diffusion-1-5-seg-v11p-onnx',
+    revision: 'main',
+    fp16: true,
+    width: 512,
+    height: 512,
+    steps: 20,
+    hasImg2Img: true,
+    hasControlNet: true,
+    controlnet: 'semantic_segmentation'
+  },
+  {
+    name: 'StableDiffusion 1.5 Base FP16 OpenPose (2.9GB)',
+    repo: 'jdp8/stable-diffusion-1-5-openpose-v11p-onnx',
+    revision: 'main',
+    fp16: true,
+    width: 512,
+    height: 512,
+    steps: 20,
+    hasImg2Img: true,
+    hasControlNet: true,
+    controlnet: 'openpose'
   },
 ]
 
@@ -110,6 +137,8 @@ function App() {
   const [inputImage, setInputImage] = useState<Float32Array>();
   const [strength, setStrength] = useState(0.8);
   const [controlNetImage, setControlNetImage] = useState<Float32Array>();
+  const [annotator_model, setAnnotatorModel] = useState('');
+  const [annotator_config, setAnnotatorConfig] = useState('');
   const [runVaeOnEachStep, setRunVaeOnEachStep] = useState(false);
   useEffect(() => {
     setModelCacheDir('models')
@@ -201,7 +230,7 @@ function App() {
    * @param type Pipeline of the input image.
    * @returns void
    */
-  function uploadImage(e: any, type: 'controlnet'|'img2img') {
+  function uploadImage(e: any, type: 'controlnet'|'img2img', controlnet='canny') {
     if(!e.target.files[0]) {
       // No image uploaded
       return;
@@ -225,29 +254,70 @@ function App() {
           setInputImage(rgb_array);
         }
         else if(type == 'controlnet') {
-          // For now only Canny Edge Detection is available
           const cvImg = cv.imread(uploadedImage); // RGBA Image | 4 Channels
-          const imgGray = new cv.Mat();
-          cv.cvtColor(cvImg, imgGray, cv.COLOR_RGBA2GRAY); // Gray Image | 1 Channel
-          const imgCanny = new cv.Mat();
-          cv.Canny(imgGray, imgCanny, 100, 200, 3, false); // Canny Image | 1 Channel
-          const rgbaCanny = new cv.Mat();
-          cv.cvtColor(imgCanny, rgbaCanny, cv.COLOR_GRAY2RGBA, 0); // RGBA Canny Image | 4 Channels
 
-          /**
-           * The canny data can be accessed as so:
-           * cannyEdges.data -> UInt8Array
-           * cannyEdges.data8S -> Int8Array
-           * cannyEdges.data16S -> Int16Array
-           * cannyEdges.data16U -> UInt16Array
-           * cannyEdges.data32F -> Float32Array
-           * cannyEdges.data32S -> Int32Array
-           * cannyEdges.data64F -> Float64Array
-           */
+          if(controlnet == 'semantic_segmentation') {
+            const inputSize = [513, 513];
+            const mean = [127.5, 127.5, 127.5];
+            const std = 0.007843;
+            const swapRB = false;
 
-          const rgbCanny = getRgbData(Uint8ClampedArray.from(rgbaCanny.data), false);
-          setControlNetImage(rgbCanny);
-          cvImg.delete();imgGray.delete();imgCanny.delete();rgbaCanny.delete();
+            const input = getBlobFromImage(inputSize, mean, std, swapRB, cvImg);
+            const net = cv.readNet(annotator_model);
+            net.setInput(input);
+            const result = net.forward();
+            const colors = generateColors(result);
+            const output = segArgmax(result, colors);
+            const resizedOutput = new cv.Mat();
+            const dsize = new cv.Size(512, 512);
+            cv.resize(output, resizedOutput, dsize, 0, 0, cv.INTER_AREA);
+            const rgbSem = getRgbData(Uint8ClampedArray.from(resizedOutput.data), false);
+            setControlNetImage(rgbSem);
+            cvImg.delete();input.delete();net.delete();result.delete();resizedOutput.delete();
+          }
+          else if(controlnet == 'openpose') {
+            // inputSize can be changed, the original is [368, 368]. The higher the size, the slower the annotation and vice-versa.
+            const inputSize = [125, 125];
+            const mean = [0, 0, 0];
+            const std = 0.00392;
+            const swapRB = false;
+            const threshold = 0.1;
+
+            // the pairs of keypoint, can be "COCO", "MPI" and "BODY_25"
+            let dataset = '';
+
+            if(annotator_model == 'pose_iter_584000.caffemodel') {
+              dataset = 'BODY_25'
+            }
+            else if(annotator_model == 'pose_iter_440000.caffemodel') {
+              dataset = 'COCO'
+            }
+            else if (annotator_model == 'pose_iter_160000.caffemodel') {
+              dataset = 'MPI'
+            }
+
+            const input = getBlobFromImage(inputSize, mean, std, swapRB, cvImg);
+            let net = cv.readNet(annotator_model, annotator_config);
+            net.setInput(input);
+            const result = net.forward();
+            const output = posePostProcess(result, dataset, threshold, 512, 512);
+            const rgbaPose = new cv.Mat();
+            cv.cvtColor(output, rgbaPose, cv.COLOR_RGB2RGBA, 0); // RGBA Pose Image | 4 Channels
+            const rgbPose = getRgbData(Uint8ClampedArray.from(rgbaPose.data), false);
+            setControlNetImage(rgbPose);
+            cvImg.delete();input.delete();net.delete();result.delete();rgbaPose.delete();
+          }
+          else if(controlnet == 'canny') {
+            const imgGray = new cv.Mat();
+            cv.cvtColor(cvImg, imgGray, cv.COLOR_RGBA2GRAY); // Gray Image | 1 Channel
+            const imgCanny = new cv.Mat();
+            cv.Canny(imgGray, imgCanny, 100, 200, 3, false); // Canny Image | 1 Channel
+            const rgbaCanny = new cv.Mat();
+            cv.cvtColor(imgCanny, rgbaCanny, cv.COLOR_GRAY2RGBA, 0); // RGBA Canny Image | 4 Channels
+            const rgbCanny = getRgbData(Uint8ClampedArray.from(rgbaCanny.data), false);
+            setControlNetImage(rgbCanny);
+            cvImg.delete();imgGray.delete();imgCanny.delete();rgbaCanny.delete();
+          }
         }
       });
       uploadedImage.src = file.target.result;
@@ -333,13 +403,43 @@ function App() {
                 {selectedPipeline?.hasControlNet &&
                   (
                     <>
-                      <label htmlFor="upload_controlnet_image">Upload Image for ControlNet Pipeline:</label>
+                      <label htmlFor="upload_annotator_model">Upload Annotator Model for ControlNet Pipeline:</label>
+                      <TextField
+                        id="upload_annotator_model"
+                        inputProps={{accept:".caffemodel,.pb"}}
+                        type={"file"}
+                        disabled={modelState != 'ready'}
+                        onChange={async (e) => {
+                          const fileName = await loadAnnotatorFile(e)
+                          //@ts-ignore
+                          setAnnotatorModel(fileName)
+                        }}
+                      />
+
+                      {selectedPipeline?.controlnet == 'openpose' && 
+                        (
+                          <>
+                            <label htmlFor="upload_config">Upload Annotator Config File for ControlNet Pipeline:</label>
+                            <TextField
+                              id="upload_config"
+                              inputProps={{accept:".prototxt"}}
+                              type={"file"}
+                              disabled={modelState != 'ready'}
+                              onChange={async (e) => {
+                                const fileName = await loadAnnotatorFile(e)
+                                //@ts-ignore
+                                setAnnotatorConfig(fileName)
+                              }}
+                            />
+                          </>
+                      )}
+                      <label htmlFor="upload_controlnet_image">Upload Image for ControlNet Pipeline (annotator files must be uploaded first):</label>
                       <TextField
                         id="upload_controlnet_image"
                         inputProps={{accept:"image/*"}}
                         type={"file"}
                         disabled={modelState != 'ready'}
-                        onChange={(e) => uploadImage(e, "controlnet")}
+                        onChange={(e) => uploadImage(e, "controlnet", selectedPipeline.controlnet)}
                       />
                   </>
                 )}
