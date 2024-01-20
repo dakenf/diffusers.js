@@ -21,6 +21,10 @@ export class DiffusionPipeline {
         if (typeof index.controlnet !== 'undefined') {
           return StableDiffusionControlNetPipeline.fromPretrained(modelRepoOrPath, options)
         }
+        // temp hack to identify the SD Turbo model
+        if (index.scheduler[1] === 'EulerDiscreteScheduler') {
+          return SDTurboPipeline.fromPretrained(modelRepoOrPath, options)
+        }
         return StableDiffusionPipeline.fromPretrained(modelRepoOrPath, options)
       case 'StableDiffusionXLPipeline':
       case 'ORTStableDiffusionXLPipeline':
