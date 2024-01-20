@@ -227,6 +227,56 @@ Tensor.prototype.cos_ = function () {
   return this
 }
 
+Tensor.prototype.sqrt = function () {
+  return this.clone().sqrt_()
+}
+
+Tensor.prototype.sqrt_ = function () {
+  for (let i = 0; i < this.data.length; ++i) {
+    this.data[i] = Math.sqrt(this.data[i])
+  }
+  return this
+}
+
+export function interp (
+  x: Tensor,
+  xp: Tensor,
+  fp: Tensor,
+) {
+  if (xp.dims.length !== 1) {
+    throw new Error('xp must be 1 dimensional')
+  }
+  if (fp.dims.length !== 1) {
+    throw new Error('fp must be 1 dimensional')
+  }
+  if (xp.dims[0] !== fp.dims[0]) {
+    throw new Error('xp and fp must have the same length')
+  }
+  if (x.dims.length !== 1) {
+    throw new Error('x must be 1 dimensional')
+  }
+  const newDims = x.dims.slice()
+  // @ts-ignore
+  const newData = new x.data.constructor(newDims.reduce((a, b) => a * b))
+  const left = fp.data[0]
+  const right = fp.data[fp.data.length - 1]
+  for (let i = 0; i < newData.length; ++i) {
+    const index = xp.data.findIndex((v) => v > x.data[i])
+    if (index === -1) {
+      newData[i] = right
+    } else if (index === 0) {
+      newData[i] = left
+    } else {
+      const x1 = xp.data[index - 1]
+      const x2 = xp.data[index]
+      const y1 = fp.data[index - 1]
+      const y2 = fp.data[index]
+      newData[i] = ((x.data[i] - x1) * (y2 - y1)) / (x2 - x1) + y1
+    }
+  }
+  return new Tensor(x.type, newData, newDims)
+}
+
 Tensor.prototype.location = 'cpu'
 
 export function range (start: number, end: number, step = 1, type = 'float32') {

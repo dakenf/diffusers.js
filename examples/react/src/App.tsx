@@ -55,6 +55,17 @@ const pipelines = [
     hasImg2Img: false,
     hasControlNet: false
   },
+  {
+    name: 'SD Turbo (2.6GB)',
+    repo: 'cyrildiagne/sdturbo-onnx',
+    revision: 'main',
+    fp16: true,
+    width: 512,
+    height: 512,
+    steps: 1,
+    hasImg2Img: false,
+    hasControlNet: false,
+  },
   // {
   //   name: 'LCM Dreamshaper FP32 (4.2GB)',
   //   repo: 'aislamov/lcm-dreamshaper-v7-onnx',
