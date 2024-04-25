@@ -46,7 +46,7 @@ interface SelectedPipeline {
 const pipelines = [
   {
     name: 'LCM Dreamshaper FP16 (2.2GB)',
-    repo: 'aislamov/lcm-dreamshaper-fp16',
+    repo: 'aislamov/lcm-dreamshaper-v7-onnx',
     revision: 'main',
     fp16: true,
     width: 512,

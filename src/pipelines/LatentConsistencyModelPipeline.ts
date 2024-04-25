@@ -98,7 +98,19 @@ export class LatentConsistencyModelPipeline extends PipelineBase {
       status: ProgressStatus.EncodingPrompt,
     })
 
-    const promptEmbeds = await this.encodePrompt(input.prompt)
+    const tokens = this.tokenizer(
+      input.prompt,
+      {
+        return_tensor: false,
+        padding: false,
+        max_length: this.tokenizer.model_max_length,
+        return_tensor_dtype: 'int32',
+      },
+    )
+
+    // Get the maximum length between the prompt and the tokenizer model max length
+    const highestTokenLength = Math.max(tokens.input_ids.length, this.tokenizer.model_max_length)
+    const promptEmbeds = await this.encodePrompt(input.prompt, highestTokenLength)
 
     let latents = this.prepareLatents(
       batchSize,
