@@ -23,6 +23,7 @@
     "wasm-feature-detect": "^1.5.1"
   },
   "scripts": {
+    "prepare": "npm run build",
     "build": "npm run build:ts && npm run build:types",
     "build:ts": "node scripts/build.js",
     "build:types": "tsc --emitDeclarationOnly",
