@@ -23,7 +23,6 @@
     "wasm-feature-detect": "^1.5.1"
   },
   "scripts": {
-    "prepare": "npm run build",
     "build": "npm run build:ts && npm run build:types",
     "build:ts": "node scripts/build.js",
     "build:types": "tsc --emitDeclarationOnly",
@@ -34,12 +33,24 @@
   "exports": {
     ".": {
       "node": {
-        "require": "./dist/index-node.cjs",
-        "import": "./dist/index-node.esm.js"
+        "require": {
+          "types": "./dist/index-node.d.ts",
+          "default": "./dist/index-node.cjs"
+        },
+        "import": {
+          "types": "./dist/index-node.d.ts",
+          "default": "./dist/index-node.esm.js"
+        }
       },
       "default": {
-        "require": "./dist/index.js",
-        "import": "./dist/index.esm.js"
+        "require": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.esm.js"
+        }
       }
     }
   },
